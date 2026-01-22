@@ -24,26 +24,23 @@
     <div id="root"></div>
 
     <script type="text/babel">
-      const { useEffect, useMemo, useRef, useState } = React;
+      const { useEffect, useMemo, useState } = React;
 
       /**********************
        * Utils
        **********************/
-      const LS_KEY = "platos_app_v1";
+      const LS_KEY = "platos_app_v2_dates";
       const uid = () => Math.random().toString(36).slice(2, 10);
-
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
       function safeJsonParse(s, fallback) {
         try { return JSON.parse(s); } catch { return fallback; }
       }
-
       function round(n, d=0) {
         if (!isFinite(n)) return 0;
         const m = Math.pow(10, d);
         return Math.round(n*m)/m;
       }
-
       function downloadText(filename, text, mime="text/plain") {
         const blob = new Blob([text], { type: mime });
         const url = URL.createObjectURL(blob);
@@ -55,7 +52,6 @@
         a.remove();
         URL.revokeObjectURL(url);
       }
-
       function toCSV(rows) {
         const esc = (v) => {
           const s = String(v ?? "");
@@ -65,9 +61,22 @@
         return rows.map(r => r.map(esc).join(",")).join("\n");
       }
 
+      function pad2(n){ return String(n).padStart(2,"0"); }
+      function todayStr(){
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = pad2(d.getMonth()+1);
+        const da = pad2(d.getDate());
+        return `${y}-${m}-${da}`;
+      }
+      function weekdayLabel(dateStr){
+        const d = new Date(dateStr + "T00:00:00");
+        const days = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+        return days[d.getDay()];
+      }
+
       /**********************
        * WHO BMI (adult)
-       * (OMS) clasificación IMC adultos
        **********************/
       function bmiCategoryWHO(bmi) {
         if (!isFinite(bmi) || bmi <= 0) return { label: "—", key: "na" };
@@ -81,9 +90,6 @@
 
       /**********************
        * Calorie estimation (practical)
-       * - Uses Mifflin-St Jeor + activity factor
-       * - WHO BMI is used for "status"/structure + guardrails
-       * Nota: esto es estimación práctica, no diagnóstico médico
        **********************/
       const ACTIVITY = [
         { key: "sed", label: "Sedentario", factor: 1.2 },
@@ -92,25 +98,18 @@
         { key: "high", label: "Alto (6–7 días/sem)", factor: 1.725 },
         { key: "ath", label: "Muy alto (doble sesión)", factor: 1.9 },
       ];
-
       function bmrMifflin({ sex, weightKg, heightCm, age }) {
         if (!(weightKg>0 && heightCm>0 && age>0)) return 0;
-        // Mifflin-St Jeor
         const s = sex === "f" ? -161 : 5;
         return 10*weightKg + 6.25*heightCm - 5*age + s;
       }
-
       function goalAdjust(goalKey) {
-        // Ajustes típicos
         if (goalKey === "lose") return -450;
         if (goalKey === "lose_fast") return -650;
         if (goalKey === "gain") return +250;
-        return 0; // maintain
+        return 0;
       }
-
-      function proteinPerKg(goalKey, bmiKey) {
-        // Heurística simple para sostener masa magra:
-        // bajar: 1.8–2.2 g/kg; mantener: 1.6–1.8; subir: 1.8
+      function proteinPerKg(goalKey) {
         if (goalKey.startsWith("lose")) return 2.0;
         if (goalKey === "gain") return 1.8;
         return 1.6;
@@ -127,7 +126,6 @@
         { key: "infusion", label: "Infusión" },
         { key: "extra", label: "Extra" },
       ];
-
       const UNITS = [
         { key: "g", label: "g" },
         { key: "ml", label: "ml" },
@@ -137,14 +135,12 @@
       const MEAL_TYPES = [
         { key: "desayuno", label: "Desayuno", slots: ["proteina", "fruta", "infusion", "extra"] },
         { key: "merienda", label: "Merienda", slots: ["proteina", "fruta", "infusion", "extra"] },
+        // 2 vegetales (para “mitad+mitad”), 1 hidrato opcional
         { key: "principal", label: "Plato principal", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
         { key: "cena", label: "Cena", slots: ["proteina", "vegetal", "vegetal", "infusion", "extra"] },
       ];
 
-      const DAYS = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
-
       function defaultIngredients() {
-        // Lista base editable (podés sumar todo lo que quieras)
         return [
           // Proteínas
           { id: uid(), name: "Pollo (pechuga)", category:"proteina", unit:"g", portionDefault:180, kcalPer100:165 },
@@ -154,9 +150,9 @@
           { id: uid(), name: "Yogurt griego natural", category:"proteina", unit:"g", portionDefault:220, kcalPer100:70 },
 
           // Vegetales
-          { id: uid(), name: "Ensalada mixta", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:25 },
-          { id: uid(), name: "Brócoli", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:35 },
-          { id: uid(), name: "Zapallito", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:20 },
+          { id: uid(), name: "Ensalada mixta", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:25 },
+          { id: uid(), name: "Brócoli", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:35 },
+          { id: uid(), name: "Zapallito", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:20 },
 
           // Frutas
           { id: uid(), name: "Manzana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:95 },
@@ -193,23 +189,85 @@
         ];
       }
 
-      function makeEmptyWeek() {
-        // week[dayIndex] = array of meals
-        return Array.from({length: 7}, () => []);
+      // Plan por perfil: fechas reales
+      function makeEmptyPlanDates() {
+        const t = todayStr();
+        return {
+          selectedDate: t,
+          dateList: [t],                 // fechas “guardadas” para click rápido
+          selectedForShopping: { [t]: true }, // qué fechas se suman en compras
+          mealsByDate: { [t]: [] },      // { "YYYY-MM-DD": [meals...] }
+        };
       }
 
       function defaultState() {
+        const prof = defaultProfiles();
         return {
-          profiles: defaultProfiles(),
-          activeProfileId: null,
+          profiles: prof,
+          activeProfileId: prof[0]?.id ?? null,
           ingredients: defaultIngredients(),
-          // plansByProfileId: { [id]: weekPlan }
-          plansByProfileId: {},
+          plansByProfileId: {}, // { [pid]: planDates }
         };
       }
 
       /**********************
-       * Components
+       * Meal kcal
+       **********************/
+      function kcalForItem(ing, qty) {
+        if (!ing) return 0;
+        if (ing.unit === "u") {
+          const perU = ing.kcalPerUnit ?? 0;
+          return (qty ?? 0) * perU;
+        }
+        const per100 = ing.kcalPer100 ?? 0;
+        return ((qty ?? 0) * per100) / 100;
+      }
+      function mealTotals(meal, ingById) {
+        let kcal = 0;
+        for (const it of meal.items) {
+          const ing = ingById[it.ingredientId];
+          kcal += kcalForItem(ing, it.qty);
+        }
+        return { kcal: round(kcal, 0) };
+      }
+
+      /**********************
+       * Porciones fijas por “escenario” según kcal objetivo
+       * - Bandas: low / mid / high
+       * - Multiplicadores por tipo de comida y categoría
+       **********************/
+      function kcalBand(targetKcal) {
+        if (!isFinite(targetKcal) || targetKcal <= 0) return "mid";
+        if (targetKcal < 1800) return "low";
+        if (targetKcal < 2400) return "mid";
+        return "high";
+      }
+
+      const PORTION_MULT = {
+        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        principal: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+      };
+
+      function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotIndex=0, vegSlotCount=1 }) {
+        if (!ing) return 0;
+        const band = kcalBand(targetKcal);
+        const def = ing.portionDefault ?? 0;
+        const m = (PORTION_MULT[mealType]?.[slotCat]?.[band]) ?? 1.0;
+
+        // Si hay 2 slots vegetales, dividimos la porción para que no sea gigante por duplicado:
+        if (slotCat === "vegetal" && vegSlotCount > 1) {
+          // total vegetal sugerido ≈ def * m * 1.2, repartido entre slots
+          const total = def * m * 1.2;
+          return round(total / vegSlotCount, 0);
+        }
+
+        return round(def * m, 0);
+      }
+
+      /**********************
+       * UI Components
        **********************/
       function Badge({ children }) {
         return (
@@ -218,12 +276,33 @@
           </span>
         );
       }
-
+      function Card({ title, right, children }) {
+        return (
+          <div className="rounded-2xl bg-white shadow-sm border border-zinc-100">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100">
+              <div className="font-semibold">{title}</div>
+              <div>{right}</div>
+            </div>
+            <div className="p-4">{children}</div>
+          </div>
+        );
+      }
+      function TextField({ label, value, onChange, placeholder }) {
+        return (
+          <label className="block">
+            <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
+            <input
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+              value={value}
+              placeholder={placeholder}
+              onChange={(e)=> onChange(e.target.value)}
+            />
+          </label>
+        );
+      }
       function NumberField({ label, value, onChange, min, max, step=1, suffix }) {
-        // keep as string to allow typing
         const [txt, setTxt] = useState(String(value ?? ""));
         useEffect(() => setTxt(String(value ?? "")), [value]);
-
         return (
           <label className="block">
             <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
@@ -245,11 +324,10 @@
           </label>
         );
       }
-
       function Select({ label, value, onChange, options }) {
         return (
           <label className="block">
-            <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
+            {label ? <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div> : null}
             <select
               className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
               value={value}
@@ -263,54 +341,6 @@
         );
       }
 
-      function TextField({ label, value, onChange, placeholder }) {
-        return (
-          <label className="block">
-            <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
-            <input
-              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
-              value={value}
-              placeholder={placeholder}
-              onChange={(e)=> onChange(e.target.value)}
-            />
-          </label>
-        );
-      }
-
-      function Card({ title, right, children }) {
-        return (
-          <div className="rounded-2xl bg-white shadow-sm border border-zinc-100">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100">
-              <div className="font-semibold">{title}</div>
-              <div>{right}</div>
-            </div>
-            <div className="p-4">{children}</div>
-          </div>
-        );
-      }
-
-      /**********************
-       * Meal calculations
-       **********************/
-      function kcalForItem(ing, qty) {
-        if (!ing) return 0;
-        if (ing.unit === "u") {
-          const perU = ing.kcalPerUnit ?? 0;
-          return (qty ?? 0) * perU;
-        }
-        const per100 = ing.kcalPer100 ?? 0;
-        return ((qty ?? 0) * per100) / 100;
-      }
-
-      function mealTotals(meal, ingById) {
-        let kcal = 0;
-        for (const it of meal.items) {
-          const ing = ingById[it.ingredientId];
-          kcal += kcalForItem(ing, it.qty);
-        }
-        return { kcal: round(kcal, 0) };
-      }
-
       /**********************
        * App
        **********************/
@@ -319,15 +349,44 @@
           const raw = localStorage.getItem(LS_KEY);
           const st = raw ? safeJsonParse(raw, null) : null;
           const base = defaultState();
-          if (!st) return { ...base, activeProfileId: base.profiles[0]?.id ?? null };
-          // merge minimal
-          const merged = {
-            profiles: Array.isArray(st.profiles) && st.profiles.length ? st.profiles : base.profiles,
-            activeProfileId: st.activeProfileId ?? (st.profiles?.[0]?.id ?? base.profiles[0]?.id ?? null),
-            ingredients: Array.isArray(st.ingredients) && st.ingredients.length ? st.ingredients : base.ingredients,
-            plansByProfileId: st.plansByProfileId ?? {},
-          };
-          return merged;
+          if (!st) return base;
+
+          // Migración suave desde versiones viejas:
+          // - si plansByProfileId[pid] es array (week), lo convertimos a fechas (hoy + 6)
+          const migrated = { ...base, ...st };
+          if (!migrated.profiles?.length) migrated.profiles = base.profiles;
+          if (!migrated.ingredients?.length) migrated.ingredients = base.ingredients;
+          if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
+          if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
+
+          for (const p of migrated.profiles) {
+            const plan = migrated.plansByProfileId[p.id];
+            if (!plan) continue;
+
+            if (Array.isArray(plan)) {
+              // old week array -> convert
+              const t = new Date(todayStr() + "T00:00:00");
+              const dateList = [];
+              const mealsByDate = {};
+              const selectedForShopping = {};
+              for (let i=0;i<7;i++){
+                const d = new Date(t);
+                d.setDate(d.getDate()+i);
+                const ds = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+                dateList.push(ds);
+                mealsByDate[ds] = plan[i] ?? [];
+                selectedForShopping[ds] = true;
+              }
+              migrated.plansByProfileId[p.id] = {
+                selectedDate: dateList[0],
+                dateList,
+                selectedForShopping,
+                mealsByDate
+              };
+            }
+          }
+
+          return migrated;
         });
 
         useEffect(() => {
@@ -336,22 +395,6 @@
 
         const profiles = state.profiles;
         const activeProfile = profiles.find(p => p.id === state.activeProfileId) ?? profiles[0] ?? null;
-
-        // ensure plan exists for profile
-        useEffect(() => {
-          if (!activeProfile) return;
-          setState(s => {
-            const has = s.plansByProfileId?.[activeProfile.id];
-            if (has) return s;
-            return {
-              ...s,
-              plansByProfileId: { ...(s.plansByProfileId||{}), [activeProfile.id]: makeEmptyWeek() }
-            };
-          });
-          // eslint-disable-next-line
-        }, [activeProfile?.id]);
-
-        const weekPlan = activeProfile ? (state.plansByProfileId?.[activeProfile.id] ?? makeEmptyWeek()) : makeEmptyWeek();
 
         const ingById = useMemo(() => {
           const m = {};
@@ -382,26 +425,43 @@
           });
           const tdee = bmr * (act.factor ?? 1.55);
           let target = tdee + goalAdjust(activeProfile.goalKey);
-          // guardrails (no extremos)
           target = clamp(target, 1400, 3800);
 
-          const protKg = proteinPerKg(activeProfile.goalKey, cat.key);
-          const protG = round(activeProfile.weightKg * protKg, 0);
+          const protG = round(activeProfile.weightKg * proteinPerKg(activeProfile.goalKey), 0);
 
           return {
             bmi: round(bmi, 1),
             bmiCat: cat,
-            bmr: round(bmr, 0),
             tdee: round(tdee, 0),
             targetKcal: round(target, 0),
             proteinG: protG,
+            band: kcalBand(target),
           };
         }, [activeProfile]);
 
-        const [tab, setTab] = useState("armador"); // armador | ingredientes | perfiles | compras
+        // Ensure plan exists for active profile
+        const plan = useMemo(() => {
+          if (!activeProfile) return null;
+          return state.plansByProfileId?.[activeProfile.id] ?? null;
+        }, [state.plansByProfileId, activeProfile]);
+
+        useEffect(() => {
+          if (!activeProfile) return;
+          setState(s => {
+            const has = s.plansByProfileId?.[activeProfile.id];
+            if (has) return s;
+            return {
+              ...s,
+              plansByProfileId: { ...(s.plansByProfileId||{}), [activeProfile.id]: makeEmptyPlanDates() }
+            };
+          });
+          // eslint-disable-next-line
+        }, [activeProfile?.id]);
+
+        const [tab, setTab] = useState("armador");
 
         /**********************
-         * Profile actions
+         * Profiles
          **********************/
         function addProfile() {
           const p = {
@@ -418,17 +478,15 @@
             ...s,
             profiles: [...s.profiles, p],
             activeProfileId: p.id,
-            plansByProfileId: { ...(s.plansByProfileId||{}), [p.id]: makeEmptyWeek() }
+            plansByProfileId: { ...(s.plansByProfileId||{}), [p.id]: makeEmptyPlanDates() }
           }));
         }
-
         function updateProfile(id, patch) {
           setState(s => ({
             ...s,
             profiles: s.profiles.map(p => p.id === id ? { ...p, ...patch } : p)
           }));
         }
-
         function removeProfile(id) {
           setState(s => {
             const nextProfiles = s.profiles.filter(p => p.id !== id);
@@ -440,7 +498,7 @@
         }
 
         /**********************
-         * Ingredient actions
+         * Ingredients
          **********************/
         function addIngredient() {
           setState(s => ({
@@ -458,57 +516,157 @@
             ]
           }));
         }
-
         function updateIngredient(id, patch) {
           setState(s => ({
             ...s,
             ingredients: s.ingredients.map(i => i.id === id ? { ...i, ...patch } : i)
           }));
         }
-
         function removeIngredient(id) {
-          // Also remove from any meals
           setState(s => {
             const nextIngredients = s.ingredients.filter(i => i.id !== id);
             const nextPlans = { ...(s.plansByProfileId||{}) };
             for (const pid of Object.keys(nextPlans)) {
-              nextPlans[pid] = (nextPlans[pid] ?? []).map(dayMeals =>
-                (dayMeals ?? []).map(meal => ({
+              const pl = nextPlans[pid];
+              if (!pl?.mealsByDate) continue;
+              const mealsByDate = { ...pl.mealsByDate };
+              for (const ds of Object.keys(mealsByDate)) {
+                mealsByDate[ds] = (mealsByDate[ds] ?? []).map(meal => ({
                   ...meal,
-                  items: meal.items.filter(it => it.ingredientId !== id)
-                }))
-              );
+                  items: (meal.items ?? []).filter(it => it.ingredientId !== id)
+                }));
+              }
+              nextPlans[pid] = { ...pl, mealsByDate };
             }
             return { ...s, ingredients: nextIngredients, plansByProfileId: nextPlans };
           });
         }
 
         /**********************
-         * Meal builder
+         * Dates + Meals
+         **********************/
+        const selectedDate = plan?.selectedDate ?? todayStr();
+        const dateList = plan?.dateList ?? [todayStr()];
+        const mealsToday = plan?.mealsByDate?.[selectedDate] ?? [];
+
+        function setSelectedDate(ds) {
+          if (!activeProfile) return;
+          setState(s => {
+            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
+            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+            if (!mealsByDate[ds]) mealsByDate[ds] = [];
+            const dateList2 = pl.dateList?.includes(ds) ? pl.dateList : [ds, ...(pl.dateList ?? [])];
+            const selShop = { ...(pl.selectedForShopping ?? {}) };
+            if (selShop[ds] === undefined) selShop[ds] = true;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [activeProfile.id]: { ...pl, selectedDate: ds, dateList: dateList2, mealsByDate, selectedForShopping: selShop }
+              }
+            };
+          });
+        }
+
+        function addDateToList(ds) {
+          if (!activeProfile) return;
+          setState(s => {
+            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
+            const dateList2 = pl.dateList?.includes(ds) ? pl.dateList : [ds, ...(pl.dateList ?? [])];
+            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+            if (!mealsByDate[ds]) mealsByDate[ds] = [];
+            const selShop = { ...(pl.selectedForShopping ?? {}) };
+            if (selShop[ds] === undefined) selShop[ds] = true;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [activeProfile.id]: { ...pl, dateList: dateList2, mealsByDate, selectedForShopping: selShop }
+              }
+            };
+          });
+        }
+
+        function toggleShopDate(ds) {
+          if (!activeProfile) return;
+          setState(s => {
+            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
+            const sel = { ...(pl.selectedForShopping ?? {}) };
+            sel[ds] = !sel[ds];
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [activeProfile.id]: { ...pl, selectedForShopping: sel }
+              }
+            };
+          });
+        }
+
+        function selectOnlyTodayForShopping() {
+          if (!activeProfile) return;
+          setState(s => {
+            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
+            const sel = {};
+            for (const ds of (pl.dateList ?? [])) sel[ds] = false;
+            sel[pl.selectedDate] = true;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [activeProfile.id]: { ...pl, selectedForShopping: sel }
+              }
+            };
+          });
+        }
+
+        function selectAllForShopping(v=true) {
+          if (!activeProfile) return;
+          setState(s => {
+            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
+            const sel = { ...(pl.selectedForShopping ?? {}) };
+            for (const ds of (pl.dateList ?? [])) sel[ds] = v;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [activeProfile.id]: { ...pl, selectedForShopping: sel }
+              }
+            };
+          });
+        }
+
+        /**********************
+         * Builder
          **********************/
         const [builderType, setBuilderType] = useState("desayuno");
         const builderDef = MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0];
 
-        const [builderItems, setBuilderItems] = useState(() => {
-          // one entry per slot
-          return builderDef.slots.map(cat => ({
-            slotCat: cat,
-            ingredientId: "",
-            qty: 0,
-          }));
-        });
+        const [builderItems, setBuilderItems] = useState(() => builderDef.slots.map(cat => ({
+          slotCat: cat, ingredientId:"", qty:0
+        })));
 
-        // reset slots when meal type changes
         useEffect(() => {
+          // reset items when type changes
           setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
           // eslint-disable-next-line
         }, [builderType]);
 
+        const targetKcal = profileStats?.targetKcal ?? 2100;
+
         function pickIngredient(slotIdx, ingredientId) {
+          const slotCat = builderDef.slots[slotIdx];
           const ing = ingById[ingredientId];
+
+          // contar slots vegetales para dividir porciones
+          const vegSlots = builderDef.slots.filter(s => s === "vegetal").length;
+          const vegIndex = builderDef.slots.slice(0, slotIdx+1).filter(s => s === "vegetal").length - 1;
+
           setBuilderItems(prev => prev.map((it, i) => {
             if (i !== slotIdx) return it;
-            const suggested = ing ? (ing.portionDefault ?? 0) : 0;
+            const suggested = ing
+              ? suggestQty({ ing, mealType: builderType, slotCat, targetKcal, vegSlotIndex: vegIndex, vegSlotCount: vegSlots })
+              : 0;
             return { ...it, ingredientId, qty: suggested };
           }));
         }
@@ -519,57 +677,71 @@
 
         const builderMeal = useMemo(() => {
           const items = builderItems
-            .filter(it => it.ingredientId && it.qty > 0)
+            .filter(it => it?.ingredientId && it.qty > 0)
             .map(it => ({ ingredientId: it.ingredientId, qty: it.qty }));
           return { id: uid(), type: builderType, items, createdAt: Date.now() };
         }, [builderItems, builderType]);
 
-        const builderTotals = useMemo(() => {
-          return mealTotals(builderMeal, ingById);
-        }, [builderMeal, ingById]);
+        const builderTotals = useMemo(() => mealTotals(builderMeal, ingById), [builderMeal, ingById]);
 
-        const [dayIndex, setDayIndex] = useState(0);
-
-        function addMealToDay() {
+        function addMealToDate() {
           if (!activeProfile) return;
           if (!builderMeal.items.length) return alert("Elegí al menos 1 ingrediente con cantidad.");
           setState(s => {
             const pid = activeProfile.id;
-            const week = s.plansByProfileId?.[pid] ? [...s.plansByProfileId[pid]] : makeEmptyWeek();
-            const dayMeals = [...(week[dayIndex] ?? [])];
-            dayMeals.push(builderMeal);
-            week[dayIndex] = dayMeals;
-            return { ...s, plansByProfileId: { ...(s.plansByProfileId||{}), [pid]: week } };
+            const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
+            const ds = pl.selectedDate ?? todayStr();
+            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+            const arr = [...(mealsByDate[ds] ?? [])];
+            arr.push(builderMeal);
+            mealsByDate[ds] = arr;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [pid]: { ...pl, mealsByDate }
+              }
+            };
           });
         }
 
-        function removeMealFromDay(idx) {
+        function removeMealFromDate(idx) {
           if (!activeProfile) return;
           setState(s => {
             const pid = activeProfile.id;
-            const week = [...(s.plansByProfileId?.[pid] ?? makeEmptyWeek())];
-            const dayMeals = [...(week[dayIndex] ?? [])];
-            dayMeals.splice(idx, 1);
-            week[dayIndex] = dayMeals;
-            return { ...s, plansByProfileId: { ...(s.plansByProfileId||{}), [pid]: week } };
+            const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
+            const ds = pl.selectedDate ?? todayStr();
+            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+            const arr = [...(mealsByDate[ds] ?? [])];
+            arr.splice(idx, 1);
+            mealsByDate[ds] = arr;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [pid]: { ...pl, mealsByDate }
+              }
+            };
           });
         }
 
-        const dayMeals = weekPlan?.[dayIndex] ?? [];
         const dayKcal = useMemo(() => {
           let sum = 0;
-          for (const m of dayMeals) sum += mealTotals(m, ingById).kcal;
+          for (const m of mealsToday) sum += mealTotals(m, ingById).kcal;
           return round(sum, 0);
-        }, [dayMeals, ingById]);
+        }, [mealsToday, ingById]);
 
         /**********************
-         * Shopping list
+         * Shopping list (sum selected dates)
          **********************/
         const shopping = useMemo(() => {
-          if (!weekPlan) return [];
+          if (!plan) return [];
+          const sel = plan.selectedForShopping ?? {};
           const map = new Map(); // ingId => qty
-          for (let d=0; d<7; d++) {
-            for (const meal of (weekPlan[d] ?? [])) {
+          for (const ds of (plan.dateList ?? [])) {
+            if (!sel[ds]) continue;
+            const meals = plan.mealsByDate?.[ds] ?? [];
+            for (const meal of meals) {
               for (const it of (meal.items ?? [])) {
                 map.set(it.ingredientId, (map.get(it.ingredientId) ?? 0) + (it.qty ?? 0));
               }
@@ -588,7 +760,7 @@
           }
           rows.sort((a,b)=> (a.category+a.ingredient).localeCompare(b.category+b.ingredient));
           return rows;
-        }, [weekPlan, ingById]);
+        }, [plan, ingById]);
 
         function exportShoppingCSV() {
           const header = [["categoria","ingrediente","cantidad","unidad"]];
@@ -599,13 +771,11 @@
         function exportJSON() {
           downloadText("platos_app_backup.json", JSON.stringify(state, null, 2), "application/json");
         }
-
         function importJSON(file) {
           const reader = new FileReader();
           reader.onload = () => {
             const obj = safeJsonParse(reader.result, null);
             if (!obj || typeof obj !== "object") return alert("JSON inválido.");
-            // very light validation
             if (!Array.isArray(obj.profiles) || !Array.isArray(obj.ingredients)) {
               return alert("El JSON no parece ser un backup de esta app.");
             }
@@ -620,7 +790,7 @@
         }
 
         /**********************
-         * UI
+         * Render
          **********************/
         return (
           <div className="min-h-screen">
@@ -628,6 +798,7 @@
               <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
                 <div className="font-bold tracking-tight">Platos · Configurador</div>
                 <Badge>localStorage</Badge>
+
                 <div className="ml-auto flex items-center gap-2">
                   <select
                     className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
@@ -681,12 +852,9 @@
             </header>
 
             <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* LEFT: Profile Stats */}
+              {/* LEFT: Profile stats + calendar */}
               <div className="lg:col-span-1 space-y-4">
-                <Card
-                  title="Perfil activo"
-                  right={<Badge>{activeProfile?.name ?? "—"}</Badge>}
-                >
+                <Card title="Perfil activo" right={<Badge>{activeProfile?.name ?? "—"}</Badge>}>
                   {!activeProfile ? (
                     <div className="text-sm text-zinc-600">Creá un perfil para empezar.</div>
                   ) : (
@@ -701,27 +869,9 @@
                             { key:"f", label:"Femenino" },
                           ]}
                         />
-                        <NumberField
-                          label="Edad"
-                          value={activeProfile.age}
-                          onChange={(n)=> updateProfile(activeProfile.id, { age: n })}
-                          min={14} max={90} step={1}
-                          suffix="años"
-                        />
-                        <NumberField
-                          label="Altura"
-                          value={activeProfile.heightCm}
-                          onChange={(n)=> updateProfile(activeProfile.id, { heightCm: n })}
-                          min={120} max={220} step={1}
-                          suffix="cm"
-                        />
-                        <NumberField
-                          label="Peso"
-                          value={activeProfile.weightKg}
-                          onChange={(n)=> updateProfile(activeProfile.id, { weightKg: n })}
-                          min={35} max={250} step={0.1}
-                          suffix="kg"
-                        />
+                        <NumberField label="Edad" value={activeProfile.age} onChange={(n)=> updateProfile(activeProfile.id, { age: n })} min={14} max={90} suffix="años" />
+                        <NumberField label="Altura" value={activeProfile.heightCm} onChange={(n)=> updateProfile(activeProfile.id, { heightCm: n })} min={120} max={220} suffix="cm" />
+                        <NumberField label="Peso" value={activeProfile.weightKg} onChange={(n)=> updateProfile(activeProfile.id, { weightKg: n })} min={35} max={250} step={0.1} suffix="kg" />
                         <Select
                           label="Actividad"
                           value={activeProfile.activityKey}
@@ -751,18 +901,18 @@
 
                           <div className="grid grid-cols-2 gap-2 pt-2">
                             <div className="rounded-lg bg-white border border-zinc-200 p-2">
-                              <div className="text-xs text-zinc-500">TDEE (estimado)</div>
+                              <div className="text-xs text-zinc-500">TDEE</div>
                               <div className="mono text-sm font-semibold">{profileStats.tdee} kcal</div>
                             </div>
                             <div className="rounded-lg bg-white border border-zinc-200 p-2">
-                              <div className="text-xs text-zinc-500">Objetivo diario</div>
+                              <div className="text-xs text-zinc-500">Objetivo</div>
                               <div className="mono text-sm font-semibold">{profileStats.targetKcal} kcal</div>
                             </div>
                             <div className="rounded-lg bg-white border border-zinc-200 p-2 col-span-2">
                               <div className="text-xs text-zinc-500">Proteína sugerida</div>
                               <div className="mono text-sm font-semibold">{profileStats.proteinG} g/día</div>
                               <div className="text-xs text-zinc-500 mt-1">
-                                Nota: estimación práctica. OMS se usa para clasificar IMC (adultos); calorías se estiman por fórmula + actividad.
+                                Escenario porciones: <span className="mono font-semibold">{profileStats.band.toUpperCase()}</span>
                               </div>
                             </div>
                           </div>
@@ -771,9 +921,7 @@
 
                       <button
                         className="w-full rounded-xl border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
-                        onClick={()=> {
-                          if (confirm("¿Eliminar este perfil?")) removeProfile(activeProfile.id);
-                        }}
+                        onClick={()=> { if (confirm("¿Eliminar este perfil?")) removeProfile(activeProfile.id); }}
                       >
                         Eliminar perfil
                       </button>
@@ -781,49 +929,79 @@
                   )}
                 </Card>
 
-                {/* Day summary */}
                 {activeProfile && tab === "armador" ? (
-                  <Card title="Día seleccionado" right={<Badge>{DAYS[dayIndex]}</Badge>}>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {DAYS.map((d, i)=> (
+                  <Card title="Calendario" right={<Badge>{selectedDate}</Badge>}>
+                    <div className="grid grid-cols-1 gap-3">
+                      <div className="flex items-end gap-2">
+                        <label className="block flex-1">
+                          <div className="text-xs font-semibold text-zinc-700 mb-1">Elegir fecha</div>
+                          <input
+                            type="date"
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                            value={selectedDate}
+                            onChange={(e)=> setSelectedDate(e.target.value)}
+                          />
+                        </label>
                         <button
-                          key={d}
-                          className={[
-                            "px-3 py-1.5 rounded-full text-sm border",
-                            dayIndex===i ? "bg-zinc-900 text-white border-zinc-900" : "bg-white border-zinc-200 hover:bg-zinc-50"
-                          ].join(" ")}
-                          onClick={()=> setDayIndex(i)}
+                          className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                          onClick={()=> setSelectedDate(todayStr())}
                         >
-                          {d.slice(0,3)}
+                          Hoy
                         </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm text-zinc-600">Total kcal (día)</div>
-                      <div className="mono text-lg font-semibold">{dayKcal}</div>
-                    </div>
-                    {profileStats ? (
-                      <div className="mt-2 text-sm text-zinc-600">
-                        Objetivo día: <span className="mono font-semibold">{profileStats.targetKcal}</span> kcal
-                        {" · "}
-                        Diferencia:{" "}
-                        <span className={"mono font-semibold " + (dayKcal > profileStats.targetKcal ? "text-red-600" : "text-emerald-600")}>
-                          {dayKcal - profileStats.targetKcal}
-                        </span>
+                        <button
+                          className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                          onClick={()=> addDateToList(selectedDate)}
+                        >
+                          + Guardar
+                        </button>
                       </div>
-                    ) : null}
+
+                      <div className="text-xs text-zinc-500">
+                        Tip: guardá varios días y después tildás cuáles sumar para la compra.
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {(dateList ?? []).map(ds => (
+                          <button
+                            key={ds}
+                            onClick={()=> setSelectedDate(ds)}
+                            className={[
+                              "px-3 py-1.5 rounded-full text-sm border",
+                              ds===selectedDate ? "bg-zinc-900 text-white border-zinc-900" : "bg-white border-zinc-200 hover:bg-zinc-50"
+                            ].join(" ")}
+                          >
+                            {weekdayLabel(ds)} {ds}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-zinc-600">Total kcal (fecha)</div>
+                        <div className="mono text-lg font-semibold">{dayKcal}</div>
+                      </div>
+                      {profileStats ? (
+                        <div className="text-sm text-zinc-600">
+                          Objetivo: <span className="mono font-semibold">{profileStats.targetKcal}</span> kcal
+                          {" · "}
+                          Dif:{" "}
+                          <span className={"mono font-semibold " + (dayKcal > profileStats.targetKcal ? "text-red-600" : "text-emerald-600")}>
+                            {dayKcal - profileStats.targetKcal}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
                   </Card>
                 ) : null}
               </div>
 
-              {/* RIGHT: Main area */}
+              {/* RIGHT */}
               <div className="lg:col-span-2 space-y-4">
                 {tab === "armador" && activeProfile ? (
                   <>
                     <Card
                       title="Armador de comidas"
                       right={
-                        <div className="flex items-center gap-2">
+                        <div className="w-56">
                           <Select
                             label=""
                             value={builderType}
@@ -835,7 +1013,8 @@
                     >
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {builderDef.slots.map((cat, idx) => {
-                          const slot = builderItems[idx];
+                          // FIX: slot seguro para evitar “pantalla blanca”
+                          const slot = builderItems[idx] ?? { ingredientId:"", qty:0 };
                           const list = ingredientsByCat[cat] ?? [];
                           const catLabel = CATS.find(c => c.key===cat)?.label ?? cat;
 
@@ -850,7 +1029,7 @@
 
                               <select
                                 className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                value={slot.ingredientId}
+                                value={slot.ingredientId ?? ""}
                                 onChange={(e)=> pickIngredient(idx, e.target.value)}
                               >
                                 <option value="">— elegir —</option>
@@ -859,10 +1038,10 @@
 
                               <div className="mt-2 grid grid-cols-2 gap-2 items-end">
                                 <NumberField
-                                  label="Cantidad"
-                                  value={slot.qty}
+                                  label="Cantidad (sugerida por perfil)"
+                                  value={slot.qty ?? 0}
                                   onChange={(n)=> setQty(idx, n)}
-                                  min={0} max={2000}
+                                  min={0} max={5000}
                                   suffix={slot.ingredientId ? (ingById[slot.ingredientId]?.unit ?? "") : ""}
                                 />
                                 <div className="rounded-xl border border-zinc-200 bg-white p-2">
@@ -885,9 +1064,9 @@
 
                         <button
                           className="rounded-xl bg-emerald-600 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500"
-                          onClick={addMealToDay}
+                          onClick={addMealToDate}
                         >
-                          + Agregar al día ({DAYS[dayIndex]})
+                          + Agregar a {selectedDate}
                         </button>
 
                         <button
@@ -899,12 +1078,12 @@
                       </div>
                     </Card>
 
-                    <Card title={`Comidas del ${DAYS[dayIndex]}`} right={<Badge>{dayMeals.length} items</Badge>}>
-                      {dayMeals.length === 0 ? (
-                        <div className="text-sm text-zinc-600">Todavía no cargaste comidas para este día.</div>
+                    <Card title={`Comidas del ${weekdayLabel(selectedDate)} ${selectedDate}`} right={<Badge>{mealsToday.length} items</Badge>}>
+                      {mealsToday.length === 0 ? (
+                        <div className="text-sm text-zinc-600">Todavía no cargaste comidas para esta fecha.</div>
                       ) : (
                         <div className="space-y-3">
-                          {dayMeals.map((m, idx) => {
+                          {mealsToday.map((m, idx) => {
                             const def = MEAL_TYPES.find(x => x.key===m.type);
                             const tot = mealTotals(m, ingById);
 
@@ -916,14 +1095,14 @@
                                     <Badge>{tot.kcal} kcal</Badge>
                                     <button
                                       className="rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
-                                      onClick={()=> removeMealFromDay(idx)}
+                                      onClick={()=> removeMealFromDate(idx)}
                                     >
                                       Quitar
                                     </button>
                                   </div>
                                 </div>
                                 <div className="mt-2 text-sm text-zinc-700">
-                                  {m.items.map((it, i) => {
+                                  {(m.items ?? []).map((it, i) => {
                                     const ing = ingById[it.ingredientId];
                                     return (
                                       <div key={i} className="flex items-center justify-between border-b last:border-b-0 border-zinc-100 py-1">
@@ -948,9 +1127,15 @@
 
                 {tab === "compras" && activeProfile ? (
                   <Card
-                    title="Lista de compras (semana)"
+                    title="Lista de compras (sumando fechas seleccionadas)"
                     right={
                       <div className="flex items-center gap-2">
+                        <button className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50" onClick={()=> selectAllForShopping(true)}>
+                          Seleccionar todo
+                        </button>
+                        <button className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50" onClick={selectOnlyTodayForShopping}>
+                          Solo hoy
+                        </button>
                         <button
                           className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
                           onClick={exportShoppingCSV}
@@ -960,9 +1145,25 @@
                       </div>
                     }
                   >
+                    <div className="mb-3">
+                      <div className="text-sm font-semibold mb-2">Fechas incluidas en la compra</div>
+                      <div className="flex flex-wrap gap-2">
+                        {(dateList ?? []).map(ds => (
+                          <label key={ds} className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!(plan?.selectedForShopping?.[ds])}
+                              onChange={()=> toggleShopDate(ds)}
+                            />
+                            <span>{weekdayLabel(ds)} {ds}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
                     {shopping.length === 0 ? (
                       <div className="text-sm text-zinc-600">
-                        No hay comidas cargadas esta semana. Agregá comidas en “Armador” y se arma sola.
+                        No hay comidas cargadas en las fechas seleccionadas. Cargá comidas y/o tildá fechas.
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
@@ -1004,7 +1205,7 @@
                     }
                   >
                     <div className="text-sm text-zinc-600 mb-3">
-                      Acá definís la “biblioteca” de ingredientes. La app usa estos datos para sugerir porciones y calcular kcal.
+                      Biblioteca editable. La porción sugerida se adapta al escenario del perfil (LOW/MID/HIGH).
                     </div>
 
                     <div className="space-y-3">
@@ -1014,11 +1215,7 @@
                           <div key={ing.id} className="rounded-xl border border-zinc-200 bg-white p-3">
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex-1">
-                                <TextField
-                                  label="Nombre"
-                                  value={ing.name}
-                                  onChange={(v)=> updateIngredient(ing.id, { name: v })}
-                                />
+                                <TextField label="Nombre" value={ing.name} onChange={(v)=> updateIngredient(ing.id, { name: v })} />
                               </div>
                               <button
                                 className="mt-6 rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
@@ -1048,10 +1245,10 @@
                                 options={UNITS}
                               />
                               <NumberField
-                                label="Porción sugerida"
+                                label="Porción base"
                                 value={ing.portionDefault ?? 0}
                                 onChange={(n)=> updateIngredient(ing.id, { portionDefault: n })}
-                                min={0} max={2000}
+                                min={0} max={5000}
                                 suffix={ing.unit}
                               />
                               {isUnit ? (
@@ -1105,6 +1302,12 @@
                           </div>
                         </div>
                       ))}
+                      <button
+                        className="w-full rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                        onClick={addProfile}
+                      >
+                        + Agregar perfil
+                      </button>
                     </div>
                   </Card>
                 ) : null}
@@ -1113,7 +1316,7 @@
 
             <footer className="max-w-6xl mx-auto px-4 pb-10">
               <div className="text-xs text-zinc-500">
-                Guardado local (localStorage). Podés exportar/importar JSON para backup.
+                Guardado local (localStorage). Exportá/Importá JSON para backup o para moverlo entre celular/PC.
               </div>
             </footer>
           </div>
