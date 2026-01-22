@@ -30,6 +30,15 @@
        * Utils
        **********************/
       const LS_KEY = "platos_app_v3_dates_weights";
+      // Migración desde posibles keys viejas (si alguna vez cambiaste la key)
+      const LS_KEYS_OLD = [
+        "platos_app_v3",
+        "platos_app_v2_dates_weights",
+        "platos_app_v2_dates",
+        "platos_app_v2",
+        "platos_app_v1",
+      ];
+
       const uid = () => Math.random().toString(36).slice(2, 10);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -139,11 +148,14 @@
         { key: "u", label: "u" },
       ];
 
+      // ✅ NUEVO ORDEN + RENOMBRE + "OTROS"
+      // Nota: ya no existe "principal"; se usa "almuerzo"
       const MEAL_TYPES = [
         { key: "desayuno", label: "Desayuno", slots: ["proteina", "fruta", "infusion", "extra"] },
+        { key: "almuerzo", label: "Almuerzo", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
         { key: "merienda", label: "Merienda", slots: ["proteina", "fruta", "infusion", "extra"] },
-        { key: "principal", label: "Plato principal", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
         { key: "cena", label: "Cena", slots: ["proteina", "vegetal", "vegetal", "infusion", "extra"] },
+        { key: "otros", label: "Otros", slots: ["proteina", "fruta", "extra", "infusion"] },
       ];
 
       function defaultIngredients() {
@@ -232,12 +244,18 @@
         if (targetKcal < 2400) return "mid";
         return "high";
       }
+
+      // ✅ Cambiamos "principal" -> "almuerzo" y agregamos "otros"
       const PORTION_MULT = {
         desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
         merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
         cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        principal: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+
+        almuerzo: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+
+        otros: { proteina:{low:0.7, mid:0.8, high:0.9}, fruta:{low:0.7, mid:0.8, high:0.9}, infusion:{low:1, mid:1, high:1}, extra:{low:0.6, mid:0.7, high:0.8} },
       };
+
       function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount=1 }) {
         if (!ing) return 0;
         const band = kcalBand(targetKcal);
@@ -280,8 +298,6 @@
         arr.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
         return arr.filter(x => x?.date && isFinite(x?.weight));
       }
-
-      // Upsert by date (si existe la fecha, se reemplaza)
       function upsertWeight(log, entry) {
         const arr = Array.isArray(log) ? [...log] : [];
         const idx = arr.findIndex(x => x.date === entry.date);
@@ -289,11 +305,9 @@
         else arr.push(entry);
         return sortWeightLog(arr);
       }
-
-      // último peso de cada mes (YYYY-MM)
       function monthlyLast(log) {
         const sorted = sortWeightLog(log);
-        const byMonth = new Map(); // ym -> {date, weight}
+        const byMonth = new Map();
         for (const e of sorted) {
           const ym = e.date.slice(0,7);
           const cur = byMonth.get(ym);
@@ -304,14 +318,11 @@
           .sort((a,b)=> a.ym.localeCompare(b.ym));
         return months;
       }
-
       function diffMonths(ymA, ymB) {
-        // ym: YYYY-MM
         const [y1,m1] = ymA.split("-").map(Number);
         const [y2,m2] = ymB.split("-").map(Number);
         return (y2 - y1)*12 + (m2 - m1);
       }
-
       function computeWeightStats(log) {
         const sorted = sortWeightLog(log);
         if (!sorted.length) return null;
@@ -326,23 +337,20 @@
           deltaVsInitial: round(m.weight - initial, 1),
         }));
 
-        // kg/mes promedio (entre primer mes y último mes disponibles)
         let avgPerMonth = 0;
         if (months.length >= 2) {
           const span = Math.max(1, diffMonths(months[0].ym, months[months.length-1].ym));
           avgPerMonth = round((months[months.length-1].weight - months[0].weight) / span, 2);
         }
 
-        // Mejor/peor mes (comparado al mes anterior)
         let best = null, worst = null;
         for (let i=1;i<months.length;i++){
           const change = round(months[i].weight - months[i-1].weight, 1);
           const obj = { ym: months[i].ym, change };
-          if (!best || change < best.change) best = obj;   // más negativo (baja) = mejor
-          if (!worst || change > worst.change) worst = obj; // más positivo (sube) = peor
+          if (!best || change < best.change) best = obj;
+          if (!worst || change > worst.change) worst = obj;
         }
 
-        // escala de barras vs inicial
         const minW = Math.min(...months.map(m=>m.weight), initial);
         const maxW = Math.max(...months.map(m=>m.weight), initial);
         const maxLoss = Math.max(0, initial - minW);
@@ -433,39 +441,78 @@
       }
 
       /**********************
+       * Migration helpers
+       **********************/
+      function findStoredState() {
+        // 1) intento la key actual
+        let raw = localStorage.getItem(LS_KEY);
+        if (raw) return raw;
+
+        // 2) si no, busco keys viejas
+        for (const k of LS_KEYS_OLD) {
+          const old = localStorage.getItem(k);
+          if (old) return old;
+        }
+        return null;
+      }
+
+      function migrateMealTypeKey(mealType) {
+        // compatibilidad: si antes guardaste "principal", ahora es "almuerzo"
+        if (mealType === "principal") return "almuerzo";
+        return mealType;
+      }
+
+      function migrateState(st) {
+        const base = defaultState();
+        if (!st || typeof st !== "object") return base;
+
+        const migrated = { ...base, ...st };
+
+        if (!Array.isArray(migrated.profiles) || !migrated.profiles.length) migrated.profiles = base.profiles;
+        if (!Array.isArray(migrated.ingredients) || !migrated.ingredients.length) migrated.ingredients = base.ingredients;
+        if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
+        if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
+
+        // Ensure weightLog exists (baseline)
+        const t = todayStr();
+        migrated.profiles = migrated.profiles.map(p => {
+          const wl = sortWeightLog(p.weightLog);
+          if (wl.length) return { ...p, weightLog: wl };
+          const w = isFinite(p.weightKg) ? p.weightKg : 0;
+          return { ...p, weightLog: w>0 ? [{ date: t, weight: w }] : [] };
+        });
+
+        // Ensure plan exists per profile + migrate meal types inside meals
+        for (const p of migrated.profiles) {
+          if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
+
+          const pl = migrated.plansByProfileId[p.id];
+          if (pl?.mealsByDate) {
+            const mealsByDate = { ...pl.mealsByDate };
+            for (const ds of Object.keys(mealsByDate)) {
+              mealsByDate[ds] = (mealsByDate[ds] ?? []).map(m => ({
+                ...m,
+                type: migrateMealTypeKey(m.type),
+              }));
+            }
+            migrated.plansByProfileId[p.id] = { ...pl, mealsByDate };
+          }
+        }
+
+        return migrated;
+      }
+
+      /**********************
        * App
        **********************/
       function App() {
         const [state, setState] = useState(() => {
-          const raw = localStorage.getItem(LS_KEY);
+          const raw = findStoredState();
           const st = raw ? safeJsonParse(raw, null) : null;
-          const base = defaultState();
-          if (!st) return base;
-
-          const migrated = { ...base, ...st };
-          if (!migrated.profiles?.length) migrated.profiles = base.profiles;
-          if (!migrated.ingredients?.length) migrated.ingredients = base.ingredients;
-          if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
-          if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
-
-          // Ensure weightLog exists (baseline)
-          const t = todayStr();
-          migrated.profiles = migrated.profiles.map(p => {
-            const wl = sortWeightLog(p.weightLog);
-            if (wl.length) return { ...p, weightLog: wl };
-            // si no hay log, creamos uno con el peso actual del perfil
-            const w = isFinite(p.weightKg) ? p.weightKg : 0;
-            return { ...p, weightLog: w>0 ? [{ date: t, weight: w }] : [] };
-          });
-
-          // Ensure plan exists per profile
-          for (const p of migrated.profiles) {
-            if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
-          }
-
-          return migrated;
+          return migrateState(st);
         });
 
+        // Guardamos SIEMPRE en la key actual
         useEffect(() => {
           localStorage.setItem(LS_KEY, JSON.stringify(state));
         }, [state]);
@@ -588,7 +635,6 @@
               if (p.id !== activeProfile.id) return p;
               const wl = upsertWeight(p.weightLog, { date: d, weight: round(w, 1) });
               const latest = wl[wl.length-1]?.weight ?? p.weightKg;
-              // actualizamos weightKg con el último registro (para que el IMC/TDEE siga tu evolución)
               return { ...p, weightLog: wl, weightKg: latest };
             });
             return { ...s, profiles: nextProfiles };
@@ -749,9 +795,11 @@
          **********************/
         const [builderType, setBuilderType] = useState("desayuno");
         const builderDef = MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0];
-        const [builderItems, setBuilderItems] = useState(() => builderDef.slots.map(cat => ({
-          slotCat: cat, ingredientId:"", qty:0
-        })));
+
+        const [builderItems, setBuilderItems] = useState(() =>
+          builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 }))
+        );
+
         useEffect(() => {
           setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
           // eslint-disable-next-line
@@ -880,11 +928,13 @@
             if (!Array.isArray(obj.profiles) || !Array.isArray(obj.ingredients)) {
               return alert("El JSON no parece ser un backup de esta app.");
             }
+            // pasamos por migración igualmente
+            const migrated = migrateState(obj);
             setState({
-              profiles: obj.profiles,
-              activeProfileId: obj.activeProfileId ?? obj.profiles?.[0]?.id ?? null,
-              ingredients: obj.ingredients,
-              plansByProfileId: obj.plansByProfileId ?? {},
+              profiles: migrated.profiles,
+              activeProfileId: migrated.activeProfileId ?? migrated.profiles?.[0]?.id ?? null,
+              ingredients: migrated.ingredients,
+              plansByProfileId: migrated.plansByProfileId ?? {},
             });
           };
           reader.readAsText(file);
@@ -1083,7 +1133,7 @@
 
                               <div className="space-y-2">
                                 {weightStats.months.map(m => {
-                                  const delta = m.deltaVsInitial; // actual - initial
+                                  const delta = m.deltaVsInitial;
                                   const isDown = delta <= 0;
                                   const mag = Math.abs(delta);
                                   const denom = isDown ? (weightStats.maxLoss || 1) : (weightStats.maxGain || 1);
@@ -1097,10 +1147,7 @@
                                       <div className="col-span-6">
                                         <div className="h-3 rounded-full bg-white border border-zinc-200 overflow-hidden">
                                           <div
-                                            className={
-                                              "h-full " +
-                                              (isDown ? "bg-emerald-500" : "bg-red-500")
-                                            }
+                                            className={"h-full " + (isDown ? "bg-emerald-500" : "bg-red-500")}
                                             style={{ width: pct + "%" }}
                                           />
                                         </div>
@@ -1131,7 +1178,7 @@
                               ) : null}
                             </div>
 
-                            {/* Log table (compact) */}
+                            {/* Log table */}
                             <div className="pt-3">
                               <div className="text-xs font-semibold text-zinc-700 mb-2">Registros (últimos 10)</div>
                               <div className="space-y-1">
@@ -1151,7 +1198,7 @@
                                 ))}
                               </div>
                               <div className="text-xs text-zinc-500 mt-2">
-                                Tip: si cargás la misma fecha, se reemplaza (sirve para “peso oficial del día”).
+                                Tip: si cargás la misma fecha, se reemplaza.
                               </div>
                             </div>
                           </div>
@@ -1326,13 +1373,14 @@
                       ) : (
                         <div className="space-y-3">
                           {mealsToday.map((m, idx) => {
-                            const def = MEAL_TYPES.find(x => x.key===m.type);
-                            const tot = mealTotals(m, ingById);
+                            const typeKey = migrateMealTypeKey(m.type);
+                            const def = MEAL_TYPES.find(x => x.key===typeKey);
+                            const tot = mealTotals({ ...m, type: typeKey }, ingById);
 
                             return (
                               <div key={m.id} className="rounded-xl border border-zinc-200 bg-white p-3">
                                 <div className="flex items-center justify-between">
-                                  <div className="font-semibold">{def?.label ?? m.type}</div>
+                                  <div className="font-semibold">{def?.label ?? typeKey}</div>
                                   <div className="flex items-center gap-2">
                                     <Badge>{tot.kcal} kcal</Badge>
                                     <button
