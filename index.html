@@ -29,7 +29,7 @@
       /**********************
        * Utils
        **********************/
-      const LS_KEY = "platos_app_v3_dates_weights";
+      const LS_KEY = "platos_app_v4_presets_packs";
       const uid = () => Math.random().toString(36).slice(2, 10);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -116,7 +116,7 @@
         return 0;
       }
       function proteinPerKg(goalKey) {
-        if (goalKey.startsWith("lose")) return 2.0;
+        if (String(goalKey||"").startsWith("lose")) return 2.0;
         if (goalKey === "gain") return 1.8;
         return 1.6;
       }
@@ -129,7 +129,7 @@
         { key: "vegetal", label: "Vegetal" },
         { key: "fruta", label: "Fruta" },
         { key: "hidrato", label: "Hidrato" },
-        { key: "infusion", label: "Infusión" },
+        { key: "infusion", label: "Infusión/Bebida" },
         { key: "extra", label: "Extra" },
       ];
       const UNITS = [
@@ -138,92 +138,81 @@
         { key: "u", label: "u" },
       ];
 
-      // ✅ Tipos como pediste
+      // ✅ Tipos de comida solicitados: desayuno, almuerzo, merienda, cena, otros
       const MEAL_TYPES = [
-        { key: "desayuno", label: "Desayuno", slots: ["proteina", "fruta", "infusion", "extra"] },
-        { key: "almuerzo", label: "Almuerzo", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
-        { key: "merienda", label: "Merienda", slots: ["proteina", "fruta", "infusion", "extra"] },
-        { key: "cena", label: "Cena", slots: ["proteina", "vegetal", "vegetal", "infusion", "extra"] },
-        // ✅ "Otros" permite cargar de todo (dejás vacío lo que no uses)
-        { key: "otros", label: "Otros", slots: ["proteina", "vegetal", "fruta", "hidrato", "infusion", "extra"] },
+        { key: "desayuno", label: "Desayuno", slots: ["proteina","fruta","infusion","extra"] },
+        { key: "almuerzo", label: "Almuerzo", slots: ["proteina","vegetal","vegetal","hidrato","infusion","extra"] },
+        { key: "merienda", label: "Merienda", slots: ["proteina","fruta","infusion","extra"] },
+        { key: "cena", label: "Cena", slots: ["proteina","vegetal","vegetal","infusion","extra"] },
+        // "Otros" permite cargar de todo rápidamente (y además podés agregar slots)
+        { key: "otros", label: "Otros", slots: ["proteina","vegetal","fruta","hidrato","infusion","extra"] },
       ];
 
+      /**********************
+       * Ingredients library (ampliada)
+       **********************/
       function defaultIngredients() {
         return [
-          // ---------------------------
-          // Proteínas base
-          // ---------------------------
+          // --- PROTEÍNAS ---
           { id: uid(), name: "Pollo (pechuga)", category:"proteina", unit:"g", portionDefault:180, kcalPer100:165 },
           { id: uid(), name: "Carne magra", category:"proteina", unit:"g", portionDefault:180, kcalPer100:190 },
-          { id: uid(), name: "Pescado", category:"proteina", unit:"g", portionDefault:200, kcalPer100:140 },
+          { id: uid(), name: "Pescado (blanco)", category:"proteina", unit:"g", portionDefault:200, kcalPer100:120 },
+          { id: uid(), name: "Atún al natural (escurrido)", category:"proteina", unit:"g", portionDefault:160, kcalPer100:116 },
           { id: uid(), name: "Huevo", category:"proteina", unit:"u", portionDefault:2, kcalPerUnit:70 },
-          { id: uid(), name: "Yogur griego natural", category:"proteina", unit:"g", portionDefault:200, kcalPer100:70 },
-
-          // ✅ Lácteos / yogures / bebidas tipo lácteo (proteína)
-          { id: uid(), name: "Yogur natural descremado", category:"proteina", unit:"g", portionDefault:200, kcalPer100:45 },
-          { id: uid(), name: "Yogur natural entero", category:"proteina", unit:"g", portionDefault:200, kcalPer100:60 },
-          { id: uid(), name: "Yogur bebible descremado", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:40 },
-          { id: uid(), name: "Yogur bebible entero", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:60 },
+          { id: uid(), name: "Claras (huevo)", category:"proteina", unit:"u", portionDefault:4, kcalPerUnit:17 },
+          { id: uid(), name: "Yogur griego natural", category:"proteina", unit:"g", portionDefault:220, kcalPer100:70 },
+          { id: uid(), name: "Yogur natural descremado", category:"proteina", unit:"g", portionDefault:250, kcalPer100:45 },
+          { id: uid(), name: "Yogur bebible descremado", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:45 },
           { id: uid(), name: "Leche descremada", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:35 },
-          { id: uid(), name: "Leche entera", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:60 },
-          { id: uid(), name: "Leche vegetal sin azúcar (almendra/soja)", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:30 },
+          { id: uid(), name: "Queso untable descremado", category:"proteina", unit:"g", portionDefault:60, kcalPer100:145 },
 
-          // ---------------------------
-          // Vegetales
-          // ---------------------------
+          // --- VEGETALES ---
           { id: uid(), name: "Ensalada mixta", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:25 },
           { id: uid(), name: "Brócoli", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:35 },
           { id: uid(), name: "Zapallito", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:20 },
+          { id: uid(), name: "Zanahoria", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:41 },
+          { id: uid(), name: "Tomate", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:18 },
+          { id: uid(), name: "Pepino", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:16 },
+          { id: uid(), name: "Espinaca", category:"vegetal", unit:"g", portionDefault:200, kcalPer100:23 },
+          { id: uid(), name: "Morrón", category:"vegetal", unit:"g", portionDefault:200, kcalPer100:31 },
 
-          // ---------------------------
-          // Frutas (más elegidas y variadas)
-          // ---------------------------
+          // --- FRUTAS ---
           { id: uid(), name: "Manzana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:95 },
-          { id: uid(), name: "Banana (mediana)", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:105 },
+          { id: uid(), name: "Banana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:105 },
           { id: uid(), name: "Naranja", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:62 },
-          { id: uid(), name: "Mandarina", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:40 },
+          { id: uid(), name: "Mandarina", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:47 },
           { id: uid(), name: "Pera", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:100 },
+          { id: uid(), name: "Kiwi", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:42 },
           { id: uid(), name: "Durazno", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:60 },
-          { id: uid(), name: "Kiwi", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:45 },
-
-          { id: uid(), name: "Frutillas", category:"fruta", unit:"g", portionDefault:150, kcalPer100:32 },
+          { id: uid(), name: "Ananá", category:"fruta", unit:"g", portionDefault:200, kcalPer100:50 },
+          { id: uid(), name: "Uvas", category:"fruta", unit:"g", portionDefault:150, kcalPer100:69 },
+          { id: uid(), name: "Frutillas", category:"fruta", unit:"g", portionDefault:200, kcalPer100:32 },
           { id: uid(), name: "Arándanos", category:"fruta", unit:"g", portionDefault:120, kcalPer100:57 },
-          { id: uid(), name: "Uvas", category:"fruta", unit:"g", portionDefault:120, kcalPer100:69 },
-          { id: uid(), name: "Ananá", category:"fruta", unit:"g", portionDefault:150, kcalPer100:50 },
-          { id: uid(), name: "Melón", category:"fruta", unit:"g", portionDefault:200, kcalPer100:34 },
-          { id: uid(), name: "Sandía", category:"fruta", unit:"g", portionDefault:250, kcalPer100:30 },
+          { id: uid(), name: "Frutos rojos (mix)", category:"fruta", unit:"g", portionDefault:120, kcalPer100:50 },
 
-          // ---------------------------
-          // Hidratos
-          // ---------------------------
+          // --- HIDRATOS ---
           { id: uid(), name: "Arroz cocido", category:"hidrato", unit:"g", portionDefault:160, kcalPer100:130 },
           { id: uid(), name: "Papa al horno", category:"hidrato", unit:"g", portionDefault:200, kcalPer100:110 },
+          { id: uid(), name: "Batata al horno", category:"hidrato", unit:"g", portionDefault:200, kcalPer100:90 },
+          { id: uid(), name: "Avena", category:"hidrato", unit:"g", portionDefault:50, kcalPer100:389 },
+          { id: uid(), name: "Pan integral", category:"hidrato", unit:"g", portionDefault:60, kcalPer100:250 },
+          { id: uid(), name: "Dulce de membrillo", category:"hidrato", unit:"g", portionDefault:30, kcalPer100:260 },
 
-          // ✅ Dulces (hidrato)
-          { id: uid(), name: "Dulce de membrillo", category:"hidrato", unit:"g", portionDefault:40, kcalPer100:245 },
-
-          // ---------------------------
-          // Infusiones / bebidas sin kcal
-          // ---------------------------
-          { id: uid(), name: "Agua", category:"infusion", unit:"ml", portionDefault:500, kcalPer100:0 },
-          { id: uid(), name: "Agua con gas", category:"infusion", unit:"ml", portionDefault:500, kcalPer100:0 },
+          // --- INFUSIONES / BEBIDAS ---
+          { id: uid(), name: "Agua", category:"infusion", unit:"ml", portionDefault:350, kcalPer100:0 },
           { id: uid(), name: "Mate", category:"infusion", unit:"ml", portionDefault:300, kcalPer100:0 },
-          { id: uid(), name: "Café (solo)", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:0 },
+          { id: uid(), name: "Café", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:0 },
           { id: uid(), name: "Té", category:"infusion", unit:"ml", portionDefault:250, kcalPer100:0 },
+          { id: uid(), name: "Agua con gas", category:"infusion", unit:"ml", portionDefault:350, kcalPer100:0 },
+          { id: uid(), name: "Gaseosa zero", category:"infusion", unit:"ml", portionDefault:330, kcalPer100:0 },
 
-          // ---------------------------
-          // Extras
-          // ---------------------------
+          // --- EXTRAS ---
           { id: uid(), name: "Almendras", category:"extra", unit:"g", portionDefault:15, kcalPer100:580 },
+          { id: uid(), name: "Nueces", category:"extra", unit:"g", portionDefault:15, kcalPer100:654 },
           { id: uid(), name: "Aceite de oliva", category:"extra", unit:"g", portionDefault:10, kcalPer100:884 },
+          { id: uid(), name: "Mantequilla de maní", category:"extra", unit:"g", portionDefault:15, kcalPer100:588 },
 
-          // ✅ Bebidas con calorías (extra)
-          { id: uid(), name: "Jugo de naranja (natural)", category:"extra", unit:"ml", portionDefault:200, kcalPer100:45 },
-          { id: uid(), name: "Gaseosa común", category:"extra", unit:"ml", portionDefault:250, kcalPer100:42 },
-          { id: uid(), name: "Gaseosa light", category:"extra", unit:"ml", portionDefault:250, kcalPer100:0 },
-          { id: uid(), name: "Agua saborizada común", category:"extra", unit:"ml", portionDefault:500, kcalPer100:20 },
-
-          // Alcohol (ejemplo)
+          // Alcohol (opcional)
           { id: uid(), name: "Vino tinto (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:85 },
           { id: uid(), name: "Vino blanco (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:82 },
         ];
@@ -246,6 +235,7 @@
         ];
       }
 
+      // Plan por perfil: fechas reales
       function makeEmptyPlanDates() {
         const t = todayStr();
         return {
@@ -256,14 +246,182 @@
         };
       }
 
-      function defaultState() {
-        const prof = defaultProfiles();
-        return {
-          profiles: prof,
-          activeProfileId: prof[0]?.id ?? null,
-          ingredients: defaultIngredients(),
-          plansByProfileId: {},
-        };
+      /**********************
+       * Presets (combinaciones prearmadas)
+       * - Se guardan por NOMBRE (match) para que no se rompan si cambian IDs
+       **********************/
+      function normalize(s){ return String(s||"").toLowerCase().trim(); }
+
+      function findIngredientIdByMatch(ingredients, category, matchText){
+        const m = normalize(matchText);
+        if (!m) return "";
+        const list = ingredients.filter(i => i.category === category);
+        let hit = list.find(i => normalize(i.name) === m);
+        if (hit) return hit.id;
+        hit = list.find(i => normalize(i.name).includes(m));
+        if (hit) return hit.id;
+        hit = ingredients.find(i => normalize(i.name).includes(m));
+        return hit ? hit.id : "";
+      }
+
+      function defaultPresets(){
+        return [
+          // DESAYUNOS
+          {
+            id: uid(),
+            mealType: "desayuno",
+            name: "Desayuno · Yogur + banana + café",
+            items: [
+              { slotCat: "proteina", match: "Yogur griego natural" },
+              { slotCat: "fruta", match: "Banana" },
+              { slotCat: "infusion", match: "Café" },
+            ],
+          },
+          {
+            id: uid(),
+            mealType: "desayuno",
+            name: "Desayuno · 2 huevos + manzana + mate",
+            items: [
+              { slotCat: "proteina", match: "Huevo" },
+              { slotCat: "fruta", match: "Manzana" },
+              { slotCat: "infusion", match: "Mate" },
+            ],
+          },
+          {
+            id: uid(),
+            mealType: "desayuno",
+            name: "Desayuno · Avena + leche + frutillas",
+            items: [
+              { slotCat: "hidrato", match: "Avena" },
+              { slotCat: "proteina", match: "Leche descremada" },
+              { slotCat: "fruta", match: "Frutillas" },
+              { slotCat: "infusion", match: "Café" },
+            ],
+          },
+
+          // MERIENDAS
+          {
+            id: uid(),
+            mealType: "merienda",
+            name: "Merienda · Yogur + arándanos + té",
+            items: [
+              { slotCat: "proteina", match: "Yogur natural descremado" },
+              { slotCat: "fruta", match: "Arándanos" },
+              { slotCat: "infusion", match: "Té" },
+            ],
+          },
+          {
+            id: uid(),
+            mealType: "merienda",
+            name: "Merienda · Leche + banana + café",
+            items: [
+              { slotCat: "proteina", match: "Leche descremada" },
+              { slotCat: "fruta", match: "Banana" },
+              { slotCat: "infusion", match: "Café" },
+            ],
+          },
+
+          // ALMUERZOS
+          {
+            id: uid(),
+            mealType: "almuerzo",
+            name: "Almuerzo · Pollo + ensalada + brócoli + arroz",
+            items: [
+              { slotCat: "proteina", match: "Pollo (pechuga)" },
+              { slotCat: "vegetal", match: "Ensalada mixta" },
+              { slotCat: "vegetal", match: "Brócoli" },
+              { slotCat: "hidrato", match: "Arroz cocido" },
+              { slotCat: "infusion", match: "Agua" },
+            ],
+          },
+          {
+            id: uid(),
+            mealType: "almuerzo",
+            name: "Almuerzo · Carne + zapallito + ensalada + papa",
+            items: [
+              { slotCat: "proteina", match: "Carne magra" },
+              { slotCat: "vegetal", match: "Zapallito" },
+              { slotCat: "vegetal", match: "Ensalada mixta" },
+              { slotCat: "hidrato", match: "Papa al horno" },
+              { slotCat: "infusion", match: "Agua" },
+            ],
+          },
+          {
+            id: uid(),
+            mealType: "almuerzo",
+            name: "Almuerzo · Atún + ensalada + batata",
+            items: [
+              { slotCat: "proteina", match: "Atún al natural" },
+              { slotCat: "vegetal", match: "Ensalada mixta" },
+              { slotCat: "hidrato", match: "Batata al horno" },
+              { slotCat: "infusion", match: "Agua con gas" },
+            ],
+          },
+
+          // CENAS
+          {
+            id: uid(),
+            mealType: "cena",
+            name: "Cena · Pescado + ensalada + agua",
+            items: [
+              { slotCat: "proteina", match: "Pescado (blanco)" },
+              { slotCat: "vegetal", match: "Ensalada mixta" },
+              { slotCat: "vegetal", match: "Tomate" },
+              { slotCat: "infusion", match: "Agua" },
+            ],
+          },
+          {
+            id: uid(),
+            mealType: "cena",
+            name: "Cena · 2 huevos + brócoli + té",
+            items: [
+              { slotCat: "proteina", match: "Huevo" },
+              { slotCat: "vegetal", match: "Brócoli" },
+              { slotCat: "infusion", match: "Té" },
+            ],
+          },
+
+          // OTROS (flex)
+          {
+            id: uid(),
+            mealType: "otros",
+            name: "Otros · Membrillo + yogur + café",
+            items: [
+              { slotCat: "hidrato", match: "Dulce de membrillo" },
+              { slotCat: "proteina", match: "Yogur griego natural" },
+              { slotCat: "infusion", match: "Café" },
+            ],
+          },
+        ];
+      }
+
+      /**********************
+       * Day Packs (día completo)
+       **********************/
+      function defaultDayPacks(){
+        return [
+          {
+            id: uid(),
+            name: "Pack · Déficit simple (clásico)",
+            // Cada meal usa un preset por tipo
+            byType: {
+              desayuno: "Desayuno · Yogur + banana + café",
+              almuerzo: "Almuerzo · Pollo + ensalada + brócoli + arroz",
+              merienda: "Merienda · Yogur + arándanos + té",
+              cena: "Cena · Pescado + ensalada + agua",
+            }
+          },
+          {
+            id: uid(),
+            name: "Pack · Alto en proteína (sin locuras)",
+            byType: {
+              desayuno: "Desayuno · 2 huevos + manzana + mate",
+              almuerzo: "Almuerzo · Carne + zapallito + ensalada + papa",
+              merienda: "Merienda · Leche + banana + café",
+              cena: "Cena · 2 huevos + brócoli + té",
+            }
+          },
+        ];
       }
 
       /**********************
@@ -276,13 +434,13 @@
         return "high";
       }
       const PORTION_MULT = {
-        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        almuerzo: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        // "otros" lo tratamos parecido a merienda (flexible)
-        otros: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, fruta:{low:0.9, mid:1.0, high:1.15}, hidrato:{low:0.8, mid:1.0, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, hidrato:{low:0.8, mid:1.0, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, hidrato:{low:0.8, mid:1.0, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, hidrato:{low:0.7, mid:1.0, high:1.2}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        almuerzo: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        otros: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, hidrato:{low:0.7, mid:1.0, high:1.25}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
       };
+
       function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount=1 }) {
         if (!ing) return 0;
         const band = kcalBand(targetKcal);
@@ -310,7 +468,7 @@
       }
       function mealTotals(meal, ingById) {
         let kcal = 0;
-        for (const it of meal.items) {
+        for (const it of (meal.items ?? [])) {
           const ing = ingById[it.ingredientId];
           kcal += kcalForItem(ing, it.qty);
         }
@@ -397,6 +555,21 @@
       }
 
       /**********************
+       * Default State
+       **********************/
+      function defaultState() {
+        const prof = defaultProfiles();
+        return {
+          profiles: prof,
+          activeProfileId: prof[0]?.id ?? null,
+          ingredients: defaultIngredients(),
+          presets: defaultPresets(),
+          dayPacks: defaultDayPacks(),
+          plansByProfileId: {},
+        };
+      }
+
+      /**********************
        * UI Components
        **********************/
       function Badge({ children }) {
@@ -442,7 +615,7 @@
                 inputMode="decimal"
                 value={txt}
                 onChange={(e)=> setTxt(e.target.value)}
-                onBlur={()=>{
+                onBlur={()=> {
                   const n = parseFloat(String(txt).replace(",", "."));
                   if (!isFinite(n)) { setTxt(String(value ?? "")); return; }
                   const nn = clamp(n, min ?? -1e9, max ?? 1e9);
@@ -479,13 +652,22 @@
           const raw = localStorage.getItem(LS_KEY);
           const st = raw ? safeJsonParse(raw, null) : null;
           const base = defaultState();
-          if (!st) return base;
+          if (!st) {
+            // crear plan por perfil
+            const plans = {};
+            for (const p of base.profiles) plans[p.id] = makeEmptyPlanDates();
+            return { ...base, plansByProfileId: plans };
+          }
 
+          // Migración segura: preserva lo existente
           const migrated = { ...base, ...st };
+
           if (!migrated.profiles?.length) migrated.profiles = base.profiles;
           if (!migrated.ingredients?.length) migrated.ingredients = base.ingredients;
           if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
           if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
+          if (!Array.isArray(migrated.presets) || migrated.presets.length === 0) migrated.presets = base.presets;
+          if (!Array.isArray(migrated.dayPacks) || migrated.dayPacks.length === 0) migrated.dayPacks = base.dayPacks;
 
           const t = todayStr();
           migrated.profiles = migrated.profiles.map(p => {
@@ -497,20 +679,6 @@
 
           for (const p of migrated.profiles) {
             if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
-          }
-
-          // ✅ MIGRACIÓN: comidas guardadas como "principal" -> "almuerzo"
-          for (const pid of Object.keys(migrated.plansByProfileId || {})) {
-            const pl = migrated.plansByProfileId[pid];
-            if (!pl?.mealsByDate) continue;
-            const mealsByDate = { ...pl.mealsByDate };
-            for (const ds of Object.keys(mealsByDate)) {
-              mealsByDate[ds] = (mealsByDate[ds] || []).map(m => {
-                if (m?.type === "principal") return { ...m, type: "almuerzo" };
-                return m;
-              });
-            }
-            migrated.plansByProfileId[pid] = { ...pl, mealsByDate };
           }
 
           return migrated;
@@ -578,6 +746,9 @@
 
         const [tab, setTab] = useState("armador");
 
+        /**********************
+         * Profiles
+         **********************/
         function addProfile() {
           const t = todayStr();
           const p = {
@@ -614,6 +785,7 @@
           });
         }
 
+        // Weight log actions
         const [weightDate, setWeightDate] = useState(todayStr());
         const [weightValue, setWeightValue] = useState(activeProfile?.weightKg ?? 0);
 
@@ -654,12 +826,22 @@
           });
         }
 
+        /**********************
+         * Ingredients
+         **********************/
         function addIngredient() {
           setState(s => ({
             ...s,
             ingredients: [
               ...s.ingredients,
-              { id: uid(), name: "Nuevo ingrediente", category: "proteina", unit: "g", portionDefault: 100, kcalPer100: 100 }
+              {
+                id: uid(),
+                name: "Nuevo ingrediente",
+                category: "proteina",
+                unit: "g",
+                portionDefault: 100,
+                kcalPer100: 100,
+              }
             ]
           }));
         }
@@ -689,11 +871,14 @@
           });
         }
 
+        /**********************
+         * Dates + Meals
+         **********************/
         const selectedDate = plan?.selectedDate ?? todayStr();
         const dateList = plan?.dateList ?? [todayStr()];
         const mealsToday = plan?.mealsByDate?.[selectedDate] ?? [];
 
-        function setSelectedDate(ds) {
+        function ensureDate(ds) {
           if (!activeProfile) return;
           setState(s => {
             const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
@@ -711,24 +896,10 @@
             };
           });
         }
-        function addDateToList(ds) {
-          if (!activeProfile) return;
-          setState(s => {
-            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
-            const dateList2 = pl.dateList?.includes(ds) ? pl.dateList : [ds, ...(pl.dateList ?? [])];
-            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
-            if (!mealsByDate[ds]) mealsByDate[ds] = [];
-            const selShop = { ...(pl.selectedForShopping ?? {}) };
-            if (selShop[ds] === undefined) selShop[ds] = true;
-            return {
-              ...s,
-              plansByProfileId: {
-                ...(s.plansByProfileId||{}),
-                [activeProfile.id]: { ...pl, dateList: dateList2, mealsByDate, selectedForShopping: selShop }
-              }
-            };
-          });
-        }
+
+        function setSelectedDate(ds) { ensureDate(ds); }
+        function addDateToList(ds) { ensureDate(ds); }
+
         function toggleShopDate(ds) {
           if (!activeProfile) return;
           setState(s => {
@@ -776,21 +947,58 @@
           });
         }
 
-        const [builderType, setBuilderType] = useState("desayuno");
-        const builderDef = MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0];
-        const [builderItems, setBuilderItems] = useState(() => builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
+        /**********************
+         * Builder + Presets
+         **********************/
+        const targetKcal = profileStats?.targetKcal ?? 2100;
 
+        const [builderType, setBuilderType] = useState("desayuno");
+        const builderDef = useMemo(() => MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0], [builderType]);
+
+        // slots editables (para "otros" y también para corregir manualmente estructura si querés)
+        const [builderSlots, setBuilderSlots] = useState(builderDef.slots);
+        useEffect(() => setBuilderSlots(builderDef.slots), [builderDef.key]);
+
+        const [builderItems, setBuilderItems] = useState(() =>
+          builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 }))
+        );
+
+        // Reset cuando cambia el tipo
         useEffect(() => {
           setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
+          setBuilderSlots(builderDef.slots);
           // eslint-disable-next-line
         }, [builderType]);
 
-        const targetKcal = profileStats?.targetKcal ?? 2100;
+        const presetsForType = useMemo(() => {
+          const all = Array.isArray(state.presets) ? state.presets : [];
+          return all.filter(p => p.mealType === builderType).sort((a,b)=> a.name.localeCompare(b.name));
+        }, [state.presets, builderType]);
+
+        const [selectedPresetId, setSelectedPresetId] = useState("");
+        useEffect(() => {
+          const first = presetsForType[0]?.id ?? "";
+          setSelectedPresetId(first);
+        }, [builderType, presetsForType.length]);
+
+        function setSlotCat(idx, catKey) {
+          setBuilderSlots(prev => prev.map((c,i)=> i===idx ? catKey : c));
+          setBuilderItems(prev => prev.map((it,i)=> i===idx ? { slotCat: catKey, ingredientId:"", qty:0 } : it));
+        }
+
+        function addSlot() {
+          setBuilderSlots(prev => [...prev, "extra"]);
+          setBuilderItems(prev => [...prev, { slotCat: "extra", ingredientId:"", qty:0 }]);
+        }
+        function removeSlot(idx) {
+          setBuilderSlots(prev => prev.filter((_,i)=> i!==idx));
+          setBuilderItems(prev => prev.filter((_,i)=> i!==idx));
+        }
 
         function pickIngredient(slotIdx, ingredientId) {
-          const slotCat = builderDef.slots[slotIdx];
+          const slotCat = builderSlots[slotIdx];
           const ing = ingById[ingredientId];
-          const vegSlots = builderDef.slots.filter(s => s === "vegetal").length;
+          const vegSlots = builderSlots.filter(s => s === "vegetal").length;
 
           setBuilderItems(prev => prev.map((it, i) => {
             if (i !== slotIdx) return it;
@@ -804,10 +1012,77 @@
           setBuilderItems(prev => prev.map((it, i) => i===slotIdx ? { ...it, qty } : it));
         }
 
+        function applyPreset(presetId) {
+          const preset = (state.presets ?? []).find(p => p.id === presetId);
+          if (!preset) return;
+
+          const vegSlotsCount = builderDef.slots.filter(s => s === "vegetal").length;
+
+          // usar slots base del tipo (para que siempre aplique bien)
+          const baseSlots = builderDef.slots.slice();
+          const next = baseSlots.map(slotCat => ({ slotCat, ingredientId:"", qty:0 }));
+
+          for (const pIt of (preset.items ?? [])) {
+            const slotCat = pIt.slotCat;
+            const idx = next.findIndex(x => x.slotCat === slotCat && !x.ingredientId);
+            if (idx < 0) continue;
+
+            const ingId = findIngredientIdByMatch(state.ingredients, slotCat, pIt.match);
+            if (!ingId) continue;
+
+            const ing = ingById[ingId];
+            const suggested = ing
+              ? suggestQty({ ing, mealType: builderType, slotCat, targetKcal, vegSlotCount: vegSlotsCount })
+              : 0;
+
+            next[idx] = { ...next[idx], ingredientId: ingId, qty: suggested };
+          }
+
+          setBuilderSlots(baseSlots);
+          setBuilderItems(next);
+        }
+
+        function saveCurrentAsPreset() {
+          const name = prompt("Nombre del preset (ej: 'Desayuno · Yogur + banana'):");
+          if (!name) return;
+
+          const items = builderItems
+            .filter(it => it.ingredientId && it.qty > 0)
+            .map(it => {
+              const ing = ingById[it.ingredientId];
+              return { slotCat: it.slotCat, match: ing?.name ?? "" };
+            })
+            .filter(x => x.match);
+
+          if (!items.length) return alert("No hay ingredientes cargados para guardar como preset.");
+
+          const preset = { id: uid(), mealType: builderType, name, items };
+
+          setState(s => ({
+            ...s,
+            presets: [preset, ...(s.presets ?? [])],
+          }));
+
+          setSelectedPresetId(preset.id);
+        }
+
+        function deletePreset(presetId) {
+          const preset = (state.presets ?? []).find(p => p.id === presetId);
+          if (!preset) return;
+          if (!confirm(`¿Eliminar preset "${preset.name}"?`)) return;
+
+          setState(s => ({
+            ...s,
+            presets: (s.presets ?? []).filter(p => p.id !== presetId),
+          }));
+          setSelectedPresetId("");
+        }
+
+        // builder meal object
         const builderMeal = useMemo(() => {
           const items = builderItems
             .filter(it => it?.ingredientId && it.qty > 0)
-            .map(it => ({ ingredientId: it.ingredientId, qty: it.qty }));
+            .map(it => ({ ingredientId: it.ingredientId, qty: it.qty, slotCat: it.slotCat }));
           return { id: uid(), type: builderType, items, createdAt: Date.now() };
         }, [builderItems, builderType]);
 
@@ -854,12 +1129,164 @@
           });
         }
 
+        /**********************
+         * Día completo: Packs + duplicar día
+         **********************/
+        const [selectedPackId, setSelectedPackId] = useState(state.dayPacks?.[0]?.id ?? "");
+        useEffect(()=> {
+          if (!selectedPackId && state.dayPacks?.[0]?.id) setSelectedPackId(state.dayPacks[0].id);
+        }, [state.dayPacks?.length]);
+
+        function findPresetIdByName(mealType, presetName) {
+          const all = state.presets ?? [];
+          const hit = all.find(p => p.mealType === mealType && normalize(p.name) === normalize(presetName));
+          if (hit) return hit.id;
+          const near = all.find(p => p.mealType === mealType && normalize(p.name).includes(normalize(presetName)));
+          return near ? near.id : "";
+        }
+
+        function buildMealFromPresetId(mealType, presetId) {
+          const def = MEAL_TYPES.find(m=>m.key===mealType);
+          const preset = (state.presets ?? []).find(p => p.id === presetId);
+          if (!def || !preset) return null;
+
+          const baseSlots = def.slots.slice();
+          const vegSlotsCount = baseSlots.filter(s=>s==="vegetal").length;
+
+          const items = [];
+          for (const slotCat of baseSlots) {
+            // buscamos el primer item del preset que matchee y no haya sido usado
+            const pItem = (preset.items ?? []).find(x => x.slotCat === slotCat && !x.__used);
+            if (!pItem) continue;
+            pItem.__used = true;
+
+            const ingId = findIngredientIdByMatch(state.ingredients, slotCat, pItem.match);
+            if (!ingId) continue;
+            const ing = ingById[ingId];
+            const qty = suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount: vegSlotsCount });
+            items.push({ ingredientId: ingId, qty, slotCat });
+          }
+          // limpiar flags temporales
+          for (const it of (preset.items ?? [])) delete it.__used;
+
+          return { id: uid(), type: mealType, items, createdAt: Date.now(), fromPreset: preset.name };
+        }
+
+        function applyDayPackToSelectedDate({ replace=false } = {}) {
+          if (!activeProfile) return;
+          const pack = (state.dayPacks ?? []).find(p => p.id === selectedPackId);
+          if (!pack) return alert("Elegí un pack.");
+
+          setState(s => {
+            const pid = activeProfile.id;
+            const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
+            const ds = pl.selectedDate ?? todayStr();
+            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+
+            const existing = [...(mealsByDate[ds] ?? [])];
+            const nextArr = replace ? [] : existing;
+
+            // orden lógico del día
+            const order = ["desayuno","almuerzo","merienda","cena","otros"];
+
+            for (const mt of order) {
+              if (!pack.byType?.[mt]) continue;
+              const presetId = findPresetIdByName(mt, pack.byType[mt]);
+              if (!presetId) continue;
+              const meal = buildMealFromPresetId(mt, presetId);
+              if (meal && meal.items?.length) nextArr.push(meal);
+            }
+
+            mealsByDate[ds] = nextArr;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [pid]: { ...pl, mealsByDate }
+              }
+            };
+          });
+        }
+
+        const [dupFromDate, setDupFromDate] = useState(todayStr());
+
+        function duplicateDayMeals() {
+          if (!activeProfile) return;
+          const from = dupFromDate;
+          const to = selectedDate;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return alert("Elegí una fecha origen válida.");
+          if (from === to) return alert("Origen y destino son la misma fecha.");
+
+          setState(s => {
+            const pid = activeProfile.id;
+            const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
+            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+            const src = mealsByDate[from] ?? [];
+            mealsByDate[to] = src.map(m => ({ ...m, id: uid(), createdAt: Date.now(), duplicatedFrom: from }));
+            const dateList2 = pl.dateList?.includes(from) ? pl.dateList : [from, ...(pl.dateList ?? [])];
+            const dateList3 = dateList2.includes(to) ? dateList2 : [to, ...dateList2];
+            const selShop = { ...(pl.selectedForShopping ?? {}) };
+            if (selShop[from] === undefined) selShop[from] = true;
+            if (selShop[to] === undefined) selShop[to] = true;
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [pid]: { ...pl, dateList: dateList3, mealsByDate, selectedForShopping: selShop }
+              }
+            };
+          });
+        }
+
+        function saveSelectedDateAsPack() {
+          if (!activeProfile) return;
+          const name = prompt("Nombre del pack (día completo):");
+          if (!name) return;
+
+          // toma del día: primer comida por cada tipo (si hay más, toma la primera)
+          const byType = {};
+          for (const mt of ["desayuno","almuerzo","merienda","cena"]) {
+            const meal = (mealsToday ?? []).find(m => m.type === mt);
+            if (!meal) continue;
+
+            // Convertimos a preset implícito por nombres de ingredientes (si no existe, lo crea)
+            const presetName = `${MEAL_TYPES.find(x=>x.key===mt)?.label ?? mt} · (desde pack) ${name}`;
+            const items = (meal.items ?? [])
+              .filter(it => it.ingredientId)
+              .map(it => ({ slotCat: it.slotCat ?? "extra", match: ingById[it.ingredientId]?.name ?? "" }))
+              .filter(x => x.match);
+
+            const newPreset = { id: uid(), mealType: mt, name: presetName, items };
+
+            byType[mt] = presetName;
+
+            setState(s => ({
+              ...s,
+              presets: [newPreset, ...(s.presets ?? [])],
+            }));
+          }
+
+          // Como hicimos setState arriba, guardamos el pack en un setState separado
+          setState(s => {
+            const pack = { id: uid(), name, byType };
+            return { ...s, dayPacks: [pack, ...(s.dayPacks ?? [])] };
+          });
+
+          alert("Pack guardado. (Creé presets vinculados por nombre).");
+        }
+
+        /**********************
+         * Day kcal
+         **********************/
         const dayKcal = useMemo(() => {
           let sum = 0;
           for (const m of mealsToday) sum += mealTotals(m, ingById).kcal;
           return round(sum, 0);
         }, [mealsToday, ingById]);
 
+        /**********************
+         * Shopping list
+         **********************/
         const shopping = useMemo(() => {
           if (!plan) return [];
           const sel = plan.selectedForShopping ?? {};
@@ -877,7 +1304,12 @@
           for (const [ingId, qty] of map.entries()) {
             const ing = ingById[ingId];
             if (!ing) continue;
-            rows.push({ category: ing.category, ingredient: ing.name, qty: round(qty, 0), unit: ing.unit });
+            rows.push({
+              category: ing.category,
+              ingredient: ing.name,
+              qty: round(qty, 0),
+              unit: ing.unit,
+            });
           }
           rows.sort((a,b)=> (a.category+a.ingredient).localeCompare(b.category+b.ingredient));
           return rows;
@@ -904,6 +1336,8 @@
               profiles: obj.profiles,
               activeProfileId: obj.activeProfileId ?? obj.profiles?.[0]?.id ?? null,
               ingredients: obj.ingredients,
+              presets: obj.presets ?? defaultPresets(),
+              dayPacks: obj.dayPacks ?? defaultDayPacks(),
               plansByProfileId: obj.plansByProfileId ?? {},
             });
           };
@@ -1040,6 +1474,7 @@
                         </div>
                       ) : null}
 
+                      {/* Weight report */}
                       <div className="rounded-xl bg-white border border-zinc-200 p-3 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="font-semibold">Reporte de peso</div>
@@ -1098,6 +1533,7 @@
 
                             <div className="pt-2">
                               <div className="text-xs font-semibold text-zinc-700 mb-2">Evolución por mes (vs inicial)</div>
+
                               <div className="space-y-2">
                                 {weightStats.months.map(m => {
                                   const delta = m.deltaVsInitial;
@@ -1245,6 +1681,72 @@
                           </span>
                         </div>
                       ) : null}
+
+                      {/* PACK DÍA COMPLETO */}
+                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold text-sm">Pack (día completo)</div>
+                          <Badge>rápido</Badge>
+                        </div>
+
+                        <select
+                          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                          value={selectedPackId}
+                          onChange={(e)=> setSelectedPackId(e.target.value)}
+                        >
+                          {(state.dayPacks ?? []).map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                            onClick={()=> applyDayPackToSelectedDate({ replace:false })}
+                          >
+                            Aplicar (sumar)
+                          </button>
+                          <button
+                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                            onClick={()=> applyDayPackToSelectedDate({ replace:true })}
+                          >
+                            Aplicar (reemplazar)
+                          </button>
+                          <button
+                            className="col-span-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                            onClick={saveSelectedDateAsPack}
+                          >
+                            Guardar este día como Pack
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* DUPLICAR DÍA */}
+                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold text-sm">Duplicar comidas</div>
+                          <Badge>copiar</Badge>
+                        </div>
+
+                        <label className="block">
+                          <div className="text-xs font-semibold text-zinc-700 mb-1">Desde fecha</div>
+                          <input
+                            type="date"
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                            value={dupFromDate}
+                            onChange={(e)=> setDupFromDate(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          className="w-full rounded-xl bg-emerald-600 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-500"
+                          onClick={duplicateDayMeals}
+                        >
+                          Copiar {dupFromDate} → {selectedDate}
+                        </button>
+                        <div className="text-xs text-zinc-500">
+                          Copia todo el día origen y lo pega en la fecha seleccionada.
+                        </div>
+                      </div>
                     </div>
                   </Card>
                 ) : null}
@@ -1257,29 +1759,106 @@
                     <Card
                       title="Armador de comidas"
                       right={
-                        <div className="w-56">
-                          <Select
-                            label=""
-                            value={builderType}
-                            onChange={setBuilderType}
-                            options={MEAL_TYPES.map(m => ({ key:m.key, label:m.label }))}
-                          />
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="w-40">
+                            <Select
+                              label="Tipo"
+                              value={builderType}
+                              onChange={setBuilderType}
+                              options={MEAL_TYPES.map(m => ({ key:m.key, label:m.label }))}
+                            />
+                          </div>
+
+                          <div className="w-72">
+                            <Select
+                              label="Preset"
+                              value={selectedPresetId}
+                              onChange={setSelectedPresetId}
+                              options={[
+                                { key:"", label:"— elegir —" },
+                                ...presetsForType.map(p => ({ key:p.id, label:p.name })),
+                              ]}
+                            />
+                          </div>
+
+                          <button
+                            className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                            onClick={() => {
+                              if (!selectedPresetId) return alert("Elegí un preset.");
+                              applyPreset(selectedPresetId);
+                            }}
+                          >
+                            Aplicar
+                          </button>
+
+                          <button
+                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                            onClick={saveCurrentAsPreset}
+                            title="Guarda la selección actual como preset editable"
+                          >
+                            Guardar
+                          </button>
+
+                          <button
+                            className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+                            onClick={() => {
+                              if (!selectedPresetId) return;
+                              deletePreset(selectedPresetId);
+                            }}
+                            title="Eliminar preset"
+                          >
+                            Borrar
+                          </button>
                         </div>
                       }
                     >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm text-zinc-600">
+                          Consejo: aplicá un preset y luego editá lo que quieras (cantidades, ingredientes, agregar/sacar).
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                            onClick={addSlot}
+                            title="Agregar un slot (ideal para 'Otros' o para sumar extras)"
+                          >
+                            + Slot
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {builderDef.slots.map((cat, idx) => {
+                        {builderSlots.map((cat, idx) => {
                           const slot = builderItems[idx] ?? { ingredientId:"", qty:0 };
                           const list = ingredientsByCat[cat] ?? [];
                           const catLabel = CATS.find(c => c.key===cat)?.label ?? cat;
 
                           return (
                             <div key={idx} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                              <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center justify-between mb-2 gap-2">
                                 <div className="text-xs font-semibold text-zinc-700">
                                   {catLabel} <span className="text-zinc-400">· slot {idx+1}</span>
                                 </div>
-                                <Badge>{cat}</Badge>
+
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    className="rounded-xl border border-zinc-200 bg-white px-2 py-1 text-xs"
+                                    value={cat}
+                                    onChange={(e)=> setSlotCat(idx, e.target.value)}
+                                    title="Cambiar categoría del slot"
+                                  >
+                                    {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                  </select>
+
+                                  <button
+                                    className="rounded-lg px-2 py-1 text-xs border border-zinc-200 hover:bg-white"
+                                    onClick={()=> removeSlot(idx)}
+                                    title="Eliminar este slot"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
                               </div>
 
                               <select
@@ -1326,7 +1905,10 @@
 
                         <button
                           className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm hover:bg-zinc-50"
-                          onClick={()=> setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })))}
+                          onClick={()=> {
+                            setBuilderSlots(builderDef.slots);
+                            setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
+                          }}
                         >
                           Limpiar
                         </button>
@@ -1361,7 +1943,10 @@
                                     const ing = ingById[it.ingredientId];
                                     return (
                                       <div key={i} className="flex items-center justify-between border-b last:border-b-0 border-zinc-100 py-1">
-                                        <div>{ing?.name ?? "?"}</div>
+                                        <div className="flex items-center gap-2">
+                                          <span>{ing?.name ?? "?"}</span>
+                                          <span className="text-xs text-zinc-400">({it.slotCat ?? "slot"})</span>
+                                        </div>
                                         <div className="mono text-zinc-600">
                                           {round(it.qty, 0)} {ing?.unit ?? ""}
                                           {" · "}
@@ -1492,9 +2077,9 @@
                                 value={ing.unit}
                                 onChange={(v)=> {
                                   if (v === "u") {
-                                    updateIngredient(ing.id, { unit: v, kcalPerUnit: ing.kcalPerUnit ?? 0 });
+                                    updateIngredient(ing.id, { unit: v, kcalPerUnit: ing.kcalPerUnit ?? 0, kcalPer100: undefined });
                                   } else {
-                                    updateIngredient(ing.id, { unit: v, kcalPer100: ing.kcalPer100 ?? 0 });
+                                    updateIngredient(ing.id, { unit: v, kcalPer100: ing.kcalPer100 ?? 0, kcalPerUnit: undefined });
                                   }
                                 }}
                                 options={UNITS}
@@ -1571,7 +2156,7 @@
 
             <footer className="max-w-6xl mx-auto px-4 pb-10">
               <div className="text-xs text-zinc-500">
-                Guardado local (localStorage). Exportá/Importá JSON para backup o para moverlo entre celular/PC.
+                Guardado local (localStorage). Exportá/Importá JSON para backup o moverlo entre celular/PC.
               </div>
             </footer>
           </div>
