@@ -29,7 +29,7 @@
       /**********************
        * Utils
        **********************/
-      const LS_KEY = "platos_app_v2_dates";
+      const LS_KEY = "platos_app_v3_dates_weights";
       const uid = () => Math.random().toString(36).slice(2, 10);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -73,6 +73,13 @@
         const d = new Date(dateStr + "T00:00:00");
         const days = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
         return days[d.getDay()];
+      }
+      function monthLabel(ym){
+        // ym = YYYY-MM
+        const [y,m] = ym.split("-");
+        const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+        const mi = parseInt(m,10)-1;
+        return `${months[mi] ?? m} ${y}`;
       }
 
       /**********************
@@ -135,7 +142,6 @@
       const MEAL_TYPES = [
         { key: "desayuno", label: "Desayuno", slots: ["proteina", "fruta", "infusion", "extra"] },
         { key: "merienda", label: "Merienda", slots: ["proteina", "fruta", "infusion", "extra"] },
-        // 2 vegetales (para “mitad+mitad”), 1 hidrato opcional
         { key: "principal", label: "Plato principal", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
         { key: "cena", label: "Cena", slots: ["proteina", "vegetal", "vegetal", "infusion", "extra"] },
       ];
@@ -171,10 +177,15 @@
           // Extras
           { id: uid(), name: "Almendras", category:"extra", unit:"g", portionDefault:15, kcalPer100:580 },
           { id: uid(), name: "Aceite de oliva", category:"extra", unit:"g", portionDefault:10, kcalPer100:884 },
+
+          // Alcohol (ejemplo)
+          { id: uid(), name: "Vino tinto (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:85 },
+          { id: uid(), name: "Vino blanco (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:82 },
         ];
       }
 
       function defaultProfiles() {
+        const t = todayStr();
         return [
           {
             id: uid(),
@@ -185,6 +196,8 @@
             weightKg: 92,
             activityKey: "mod",
             goalKey: "lose",
+            // Registro inicial automático (peso inicial)
+            weightLog: [{ date: t, weight: 92 }],
           }
         ];
       }
@@ -194,9 +207,9 @@
         const t = todayStr();
         return {
           selectedDate: t,
-          dateList: [t],                 // fechas “guardadas” para click rápido
-          selectedForShopping: { [t]: true }, // qué fechas se suman en compras
-          mealsByDate: { [t]: [] },      // { "YYYY-MM-DD": [meals...] }
+          dateList: [t],
+          selectedForShopping: { [t]: true },
+          mealsByDate: { [t]: [] },
         };
       }
 
@@ -206,8 +219,36 @@
           profiles: prof,
           activeProfileId: prof[0]?.id ?? null,
           ingredients: defaultIngredients(),
-          plansByProfileId: {}, // { [pid]: planDates }
+          plansByProfileId: {},
         };
+      }
+
+      /**********************
+       * Porciones por escenario
+       **********************/
+      function kcalBand(targetKcal) {
+        if (!isFinite(targetKcal) || targetKcal <= 0) return "mid";
+        if (targetKcal < 1800) return "low";
+        if (targetKcal < 2400) return "mid";
+        return "high";
+      }
+      const PORTION_MULT = {
+        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        principal: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+      };
+      function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount=1 }) {
+        if (!ing) return 0;
+        const band = kcalBand(targetKcal);
+        const def = ing.portionDefault ?? 0;
+        const m = (PORTION_MULT[mealType]?.[slotCat]?.[band]) ?? 1.0;
+
+        if (slotCat === "vegetal" && vegSlotCount > 1) {
+          const total = def * m * 1.2;
+          return round(total / vegSlotCount, 0);
+        }
+        return round(def * m, 0);
       }
 
       /**********************
@@ -232,38 +273,88 @@
       }
 
       /**********************
-       * Porciones fijas por “escenario” según kcal objetivo
-       * - Bandas: low / mid / high
-       * - Multiplicadores por tipo de comida y categoría
+       * Weight stats (monthly + bars)
        **********************/
-      function kcalBand(targetKcal) {
-        if (!isFinite(targetKcal) || targetKcal <= 0) return "mid";
-        if (targetKcal < 1800) return "low";
-        if (targetKcal < 2400) return "mid";
-        return "high";
+      function sortWeightLog(log) {
+        const arr = Array.isArray(log) ? [...log] : [];
+        arr.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
+        return arr.filter(x => x?.date && isFinite(x?.weight));
       }
 
-      const PORTION_MULT = {
-        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        principal: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-      };
+      // Upsert by date (si existe la fecha, se reemplaza)
+      function upsertWeight(log, entry) {
+        const arr = Array.isArray(log) ? [...log] : [];
+        const idx = arr.findIndex(x => x.date === entry.date);
+        if (idx >= 0) arr[idx] = entry;
+        else arr.push(entry);
+        return sortWeightLog(arr);
+      }
 
-      function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotIndex=0, vegSlotCount=1 }) {
-        if (!ing) return 0;
-        const band = kcalBand(targetKcal);
-        const def = ing.portionDefault ?? 0;
-        const m = (PORTION_MULT[mealType]?.[slotCat]?.[band]) ?? 1.0;
+      // último peso de cada mes (YYYY-MM)
+      function monthlyLast(log) {
+        const sorted = sortWeightLog(log);
+        const byMonth = new Map(); // ym -> {date, weight}
+        for (const e of sorted) {
+          const ym = e.date.slice(0,7);
+          const cur = byMonth.get(ym);
+          if (!cur || e.date >= cur.date) byMonth.set(ym, { ...e });
+        }
+        const months = Array.from(byMonth.entries())
+          .map(([ym, v]) => ({ ym, date: v.date, weight: v.weight }))
+          .sort((a,b)=> a.ym.localeCompare(b.ym));
+        return months;
+      }
 
-        // Si hay 2 slots vegetales, dividimos la porción para que no sea gigante por duplicado:
-        if (slotCat === "vegetal" && vegSlotCount > 1) {
-          // total vegetal sugerido ≈ def * m * 1.2, repartido entre slots
-          const total = def * m * 1.2;
-          return round(total / vegSlotCount, 0);
+      function diffMonths(ymA, ymB) {
+        // ym: YYYY-MM
+        const [y1,m1] = ymA.split("-").map(Number);
+        const [y2,m2] = ymB.split("-").map(Number);
+        return (y2 - y1)*12 + (m2 - m1);
+      }
+
+      function computeWeightStats(log) {
+        const sorted = sortWeightLog(log);
+        if (!sorted.length) return null;
+
+        const initial = sorted[0].weight;
+        const current = sorted[sorted.length-1].weight;
+        const totalDelta = round(current - initial, 1);
+
+        const months = monthlyLast(sorted);
+        const monthlyDeltas = months.map(m => ({
+          ...m,
+          deltaVsInitial: round(m.weight - initial, 1),
+        }));
+
+        // kg/mes promedio (entre primer mes y último mes disponibles)
+        let avgPerMonth = 0;
+        if (months.length >= 2) {
+          const span = Math.max(1, diffMonths(months[0].ym, months[months.length-1].ym));
+          avgPerMonth = round((months[months.length-1].weight - months[0].weight) / span, 2);
         }
 
-        return round(def * m, 0);
+        // Mejor/peor mes (comparado al mes anterior)
+        let best = null, worst = null;
+        for (let i=1;i<months.length;i++){
+          const change = round(months[i].weight - months[i-1].weight, 1);
+          const obj = { ym: months[i].ym, change };
+          if (!best || change < best.change) best = obj;   // más negativo (baja) = mejor
+          if (!worst || change > worst.change) worst = obj; // más positivo (sube) = peor
+        }
+
+        // escala de barras vs inicial
+        const minW = Math.min(...months.map(m=>m.weight), initial);
+        const maxW = Math.max(...months.map(m=>m.weight), initial);
+        const maxLoss = Math.max(0, initial - minW);
+        const maxGain = Math.max(0, maxW - initial);
+
+        return {
+          initial, current, totalDelta,
+          months: monthlyDeltas,
+          avgPerMonth,
+          best, worst,
+          maxLoss, maxGain
+        };
       }
 
       /**********************
@@ -351,39 +442,25 @@
           const base = defaultState();
           if (!st) return base;
 
-          // Migración suave desde versiones viejas:
-          // - si plansByProfileId[pid] es array (week), lo convertimos a fechas (hoy + 6)
           const migrated = { ...base, ...st };
           if (!migrated.profiles?.length) migrated.profiles = base.profiles;
           if (!migrated.ingredients?.length) migrated.ingredients = base.ingredients;
           if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
           if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
 
-          for (const p of migrated.profiles) {
-            const plan = migrated.plansByProfileId[p.id];
-            if (!plan) continue;
+          // Ensure weightLog exists (baseline)
+          const t = todayStr();
+          migrated.profiles = migrated.profiles.map(p => {
+            const wl = sortWeightLog(p.weightLog);
+            if (wl.length) return { ...p, weightLog: wl };
+            // si no hay log, creamos uno con el peso actual del perfil
+            const w = isFinite(p.weightKg) ? p.weightKg : 0;
+            return { ...p, weightLog: w>0 ? [{ date: t, weight: w }] : [] };
+          });
 
-            if (Array.isArray(plan)) {
-              // old week array -> convert
-              const t = new Date(todayStr() + "T00:00:00");
-              const dateList = [];
-              const mealsByDate = {};
-              const selectedForShopping = {};
-              for (let i=0;i<7;i++){
-                const d = new Date(t);
-                d.setDate(d.getDate()+i);
-                const ds = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
-                dateList.push(ds);
-                mealsByDate[ds] = plan[i] ?? [];
-                selectedForShopping[ds] = true;
-              }
-              migrated.plansByProfileId[p.id] = {
-                selectedDate: dateList[0],
-                dateList,
-                selectedForShopping,
-                mealsByDate
-              };
-            }
+          // Ensure plan exists per profile
+          for (const p of migrated.profiles) {
+            if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
           }
 
           return migrated;
@@ -439,24 +516,15 @@
           };
         }, [activeProfile]);
 
-        // Ensure plan exists for active profile
+        const weightStats = useMemo(() => {
+          if (!activeProfile) return null;
+          return computeWeightStats(activeProfile.weightLog);
+        }, [activeProfile]);
+
         const plan = useMemo(() => {
           if (!activeProfile) return null;
           return state.plansByProfileId?.[activeProfile.id] ?? null;
         }, [state.plansByProfileId, activeProfile]);
-
-        useEffect(() => {
-          if (!activeProfile) return;
-          setState(s => {
-            const has = s.plansByProfileId?.[activeProfile.id];
-            if (has) return s;
-            return {
-              ...s,
-              plansByProfileId: { ...(s.plansByProfileId||{}), [activeProfile.id]: makeEmptyPlanDates() }
-            };
-          });
-          // eslint-disable-next-line
-        }, [activeProfile?.id]);
 
         const [tab, setTab] = useState("armador");
 
@@ -464,6 +532,7 @@
          * Profiles
          **********************/
         function addProfile() {
+          const t = todayStr();
           const p = {
             id: uid(),
             name: "Nuevo perfil",
@@ -473,6 +542,7 @@
             weightKg: 70,
             activityKey: "light",
             goalKey: "lose",
+            weightLog: [{ date: t, weight: 70 }],
           };
           setState(s => ({
             ...s,
@@ -494,6 +564,48 @@
             const nextPlans = { ...(s.plansByProfileId||{}) };
             delete nextPlans[id];
             return { ...s, profiles: nextProfiles, activeProfileId: nextActive, plansByProfileId: nextPlans };
+          });
+        }
+
+        // Weight log actions
+        const [weightDate, setWeightDate] = useState(todayStr());
+        const [weightValue, setWeightValue] = useState(activeProfile?.weightKg ?? 0);
+
+        useEffect(() => {
+          setWeightDate(todayStr());
+          setWeightValue(activeProfile?.weightKg ?? 0);
+        }, [activeProfile?.id]);
+
+        function saveWeightEntry() {
+          if (!activeProfile) return;
+          const d = String(weightDate || "").trim();
+          const w = parseFloat(String(weightValue).replace(",", "."));
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return alert("Elegí una fecha válida.");
+          if (!isFinite(w) || w <= 0) return alert("Ingresá un peso válido.");
+
+          setState(s => {
+            const nextProfiles = s.profiles.map(p => {
+              if (p.id !== activeProfile.id) return p;
+              const wl = upsertWeight(p.weightLog, { date: d, weight: round(w, 1) });
+              const latest = wl[wl.length-1]?.weight ?? p.weightKg;
+              // actualizamos weightKg con el último registro (para que el IMC/TDEE siga tu evolución)
+              return { ...p, weightLog: wl, weightKg: latest };
+            });
+            return { ...s, profiles: nextProfiles };
+          });
+        }
+
+        function deleteWeightEntry(dateStr) {
+          if (!activeProfile) return;
+          if (!confirm("¿Eliminar este registro de peso?")) return;
+          setState(s => {
+            const nextProfiles = s.profiles.map(p => {
+              if (p.id !== activeProfile.id) return p;
+              const wl = sortWeightLog(p.weightLog).filter(e => e.date !== dateStr);
+              const latest = wl.length ? wl[wl.length-1].weight : p.weightKg;
+              return { ...p, weightLog: wl, weightKg: latest };
+            });
+            return { ...s, profiles: nextProfiles };
           });
         }
 
@@ -567,7 +679,6 @@
             };
           });
         }
-
         function addDateToList(ds) {
           if (!activeProfile) return;
           setState(s => {
@@ -586,7 +697,6 @@
             };
           });
         }
-
         function toggleShopDate(ds) {
           if (!activeProfile) return;
           setState(s => {
@@ -602,7 +712,6 @@
             };
           });
         }
-
         function selectOnlyTodayForShopping() {
           if (!activeProfile) return;
           setState(s => {
@@ -619,7 +728,6 @@
             };
           });
         }
-
         function selectAllForShopping(v=true) {
           if (!activeProfile) return;
           setState(s => {
@@ -641,13 +749,10 @@
          **********************/
         const [builderType, setBuilderType] = useState("desayuno");
         const builderDef = MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0];
-
         const [builderItems, setBuilderItems] = useState(() => builderDef.slots.map(cat => ({
           slotCat: cat, ingredientId:"", qty:0
         })));
-
         useEffect(() => {
-          // reset items when type changes
           setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
           // eslint-disable-next-line
         }, [builderType]);
@@ -657,20 +762,16 @@
         function pickIngredient(slotIdx, ingredientId) {
           const slotCat = builderDef.slots[slotIdx];
           const ing = ingById[ingredientId];
-
-          // contar slots vegetales para dividir porciones
           const vegSlots = builderDef.slots.filter(s => s === "vegetal").length;
-          const vegIndex = builderDef.slots.slice(0, slotIdx+1).filter(s => s === "vegetal").length - 1;
 
           setBuilderItems(prev => prev.map((it, i) => {
             if (i !== slotIdx) return it;
             const suggested = ing
-              ? suggestQty({ ing, mealType: builderType, slotCat, targetKcal, vegSlotIndex: vegIndex, vegSlotCount: vegSlots })
+              ? suggestQty({ ing, mealType: builderType, slotCat, targetKcal, vegSlotCount: vegSlots })
               : 0;
             return { ...it, ingredientId, qty: suggested };
           }));
         }
-
         function setQty(slotIdx, qty) {
           setBuilderItems(prev => prev.map((it, i) => i===slotIdx ? { ...it, qty } : it));
         }
@@ -732,12 +833,12 @@
         }, [mealsToday, ingById]);
 
         /**********************
-         * Shopping list (sum selected dates)
+         * Shopping list
          **********************/
         const shopping = useMemo(() => {
           if (!plan) return [];
           const sel = plan.selectedForShopping ?? {};
-          const map = new Map(); // ingId => qty
+          const map = new Map();
           for (const ds of (plan.dateList ?? [])) {
             if (!sel[ds]) continue;
             const meals = plan.mealsByDate?.[ds] ?? [];
@@ -852,7 +953,7 @@
             </header>
 
             <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* LEFT: Profile stats + calendar */}
+              {/* LEFT: Profile + Weight report + calendar */}
               <div className="lg:col-span-1 space-y-4">
                 <Card title="Perfil activo" right={<Badge>{activeProfile?.name ?? "—"}</Badge>}>
                   {!activeProfile ? (
@@ -871,7 +972,7 @@
                         />
                         <NumberField label="Edad" value={activeProfile.age} onChange={(n)=> updateProfile(activeProfile.id, { age: n })} min={14} max={90} suffix="años" />
                         <NumberField label="Altura" value={activeProfile.heightCm} onChange={(n)=> updateProfile(activeProfile.id, { heightCm: n })} min={120} max={220} suffix="cm" />
-                        <NumberField label="Peso" value={activeProfile.weightKg} onChange={(n)=> updateProfile(activeProfile.id, { weightKg: n })} min={35} max={250} step={0.1} suffix="kg" />
+                        <NumberField label="Peso (auto desde log)" value={activeProfile.weightKg} onChange={(n)=> updateProfile(activeProfile.id, { weightKg: n })} min={35} max={250} step={0.1} suffix="kg" />
                         <Select
                           label="Actividad"
                           value={activeProfile.activityKey}
@@ -919,6 +1020,148 @@
                         </div>
                       ) : null}
 
+                      {/* Weight report */}
+                      <div className="rounded-xl bg-white border border-zinc-200 p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold">Reporte de peso</div>
+                          <Badge>mensual</Badge>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block">
+                            <div className="text-xs font-semibold text-zinc-700 mb-1">Fecha</div>
+                            <input
+                              type="date"
+                              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                              value={weightDate}
+                              onChange={(e)=> setWeightDate(e.target.value)}
+                            />
+                          </label>
+                          <NumberField
+                            label="Peso"
+                            value={weightValue}
+                            onChange={(n)=> setWeightValue(n)}
+                            min={30} max={300}
+                            step={0.1}
+                            suffix="kg"
+                          />
+                        </div>
+
+                        <button
+                          className="w-full rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                          onClick={saveWeightEntry}
+                        >
+                          Guardar registro
+                        </button>
+
+                        {weightStats ? (
+                          <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-3 space-y-2">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                                <div className="text-xs text-zinc-500">Inicial</div>
+                                <div className="mono font-semibold">{round(weightStats.initial,1)} kg</div>
+                              </div>
+                              <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                                <div className="text-xs text-zinc-500">Actual</div>
+                                <div className="mono font-semibold">{round(weightStats.current,1)} kg</div>
+                              </div>
+                              <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                                <div className="text-xs text-zinc-500">Variación total</div>
+                                <div className={"mono font-semibold " + (weightStats.totalDelta <= 0 ? "text-emerald-700" : "text-red-700")}>
+                                  {weightStats.totalDelta > 0 ? "+" : ""}{weightStats.totalDelta} kg
+                                </div>
+                              </div>
+                              <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                                <div className="text-xs text-zinc-500">Promedio</div>
+                                <div className="mono font-semibold">{weightStats.avgPerMonth} kg/mes</div>
+                              </div>
+                            </div>
+
+                            {/* Bars */}
+                            <div className="pt-2">
+                              <div className="text-xs font-semibold text-zinc-700 mb-2">Evolución por mes (vs inicial)</div>
+
+                              <div className="space-y-2">
+                                {weightStats.months.map(m => {
+                                  const delta = m.deltaVsInitial; // actual - initial
+                                  const isDown = delta <= 0;
+                                  const mag = Math.abs(delta);
+                                  const denom = isDown ? (weightStats.maxLoss || 1) : (weightStats.maxGain || 1);
+                                  const pct = clamp((mag / denom) * 100, 0, 100);
+
+                                  return (
+                                    <div key={m.ym} className="grid grid-cols-12 gap-2 items-center">
+                                      <div className="col-span-4 text-xs text-zinc-600">
+                                        {monthLabel(m.ym)}
+                                      </div>
+                                      <div className="col-span-6">
+                                        <div className="h-3 rounded-full bg-white border border-zinc-200 overflow-hidden">
+                                          <div
+                                            className={
+                                              "h-full " +
+                                              (isDown ? "bg-emerald-500" : "bg-red-500")
+                                            }
+                                            style={{ width: pct + "%" }}
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="col-span-2 mono text-xs text-right">
+                                        {delta > 0 ? "+" : ""}{delta} kg
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {weightStats.best || weightStats.worst ? (
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                  <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                                    <div className="text-xs text-zinc-500">Mejor mes</div>
+                                    <div className="text-sm font-semibold">
+                                      {weightStats.best ? `${monthLabel(weightStats.best.ym)} (${weightStats.best.change} kg)` : "—"}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                                    <div className="text-xs text-zinc-500">Peor mes</div>
+                                    <div className="text-sm font-semibold">
+                                      {weightStats.worst ? `${monthLabel(weightStats.worst.ym)} (+${weightStats.worst.change} kg)` : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {/* Log table (compact) */}
+                            <div className="pt-3">
+                              <div className="text-xs font-semibold text-zinc-700 mb-2">Registros (últimos 10)</div>
+                              <div className="space-y-1">
+                                {sortWeightLog(activeProfile.weightLog).slice(-10).reverse().map(e => (
+                                  <div key={e.date} className="flex items-center justify-between rounded-lg bg-white border border-zinc-200 px-2 py-1">
+                                    <div className="text-xs text-zinc-600">{e.date}</div>
+                                    <div className="flex items-center gap-2">
+                                      <div className="mono text-xs font-semibold">{round(e.weight,1)} kg</div>
+                                      <button
+                                        className="text-xs text-red-700 border border-red-200 rounded-md px-2 py-0.5 hover:bg-red-50"
+                                        onClick={()=> deleteWeightEntry(e.date)}
+                                      >
+                                        borrar
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="text-xs text-zinc-500 mt-2">
+                                Tip: si cargás la misma fecha, se reemplaza (sirve para “peso oficial del día”).
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-zinc-600">
+                            Cargá al menos 1 registro para ver el reporte.
+                          </div>
+                        )}
+                      </div>
+
                       <button
                         className="w-full rounded-xl border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
                         onClick={()=> { if (confirm("¿Eliminar este perfil?")) removeProfile(activeProfile.id); }}
@@ -957,7 +1200,7 @@
                       </div>
 
                       <div className="text-xs text-zinc-500">
-                        Tip: guardá varios días y después tildás cuáles sumar para la compra.
+                        Guardá varios días y tildá cuáles sumar para la compra.
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -1013,7 +1256,6 @@
                     >
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {builderDef.slots.map((cat, idx) => {
-                          // FIX: slot seguro para evitar “pantalla blanca”
                           const slot = builderItems[idx] ?? { ingredientId:"", qty:0 };
                           const list = ingredientsByCat[cat] ?? [];
                           const catLabel = CATS.find(c => c.key===cat)?.label ?? cat;
@@ -1038,7 +1280,7 @@
 
                               <div className="mt-2 grid grid-cols-2 gap-2 items-end">
                                 <NumberField
-                                  label="Cantidad (sugerida por perfil)"
+                                  label="Cantidad (según perfil)"
                                   value={slot.qty ?? 0}
                                   onChange={(n)=> setQty(idx, n)}
                                   min={0} max={5000}
