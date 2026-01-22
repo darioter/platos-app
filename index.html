@@ -1,0 +1,1126 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Platos · Configurador (Local)</title>
+
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- React 18 -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    </style>
+  </head>
+
+  <body class="bg-zinc-50 text-zinc-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useEffect, useMemo, useRef, useState } = React;
+
+      /**********************
+       * Utils
+       **********************/
+      const LS_KEY = "platos_app_v1";
+      const uid = () => Math.random().toString(36).slice(2, 10);
+
+      const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+      function safeJsonParse(s, fallback) {
+        try { return JSON.parse(s); } catch { return fallback; }
+      }
+
+      function round(n, d=0) {
+        if (!isFinite(n)) return 0;
+        const m = Math.pow(10, d);
+        return Math.round(n*m)/m;
+      }
+
+      function downloadText(filename, text, mime="text/plain") {
+        const blob = new Blob([text], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function toCSV(rows) {
+        const esc = (v) => {
+          const s = String(v ?? "");
+          if (/[",\n]/.test(s)) return `"${s.replaceAll('"','""')}"`;
+          return s;
+        };
+        return rows.map(r => r.map(esc).join(",")).join("\n");
+      }
+
+      /**********************
+       * WHO BMI (adult)
+       * (OMS) clasificación IMC adultos
+       **********************/
+      function bmiCategoryWHO(bmi) {
+        if (!isFinite(bmi) || bmi <= 0) return { label: "—", key: "na" };
+        if (bmi < 18.5) return { label: "Bajo peso (<18.5)", key: "under" };
+        if (bmi < 25) return { label: "Normopeso (18.5–24.9)", key: "normal" };
+        if (bmi < 30) return { label: "Sobrepeso (25–29.9)", key: "over" };
+        if (bmi < 35) return { label: "Obesidad I (30–34.9)", key: "ob1" };
+        if (bmi < 40) return { label: "Obesidad II (35–39.9)", key: "ob2" };
+        return { label: "Obesidad III (≥40)", key: "ob3" };
+      }
+
+      /**********************
+       * Calorie estimation (practical)
+       * - Uses Mifflin-St Jeor + activity factor
+       * - WHO BMI is used for "status"/structure + guardrails
+       * Nota: esto es estimación práctica, no diagnóstico médico
+       **********************/
+      const ACTIVITY = [
+        { key: "sed", label: "Sedentario", factor: 1.2 },
+        { key: "light", label: "Ligero (1–3 días/sem)", factor: 1.375 },
+        { key: "mod", label: "Moderado (3–5 días/sem)", factor: 1.55 },
+        { key: "high", label: "Alto (6–7 días/sem)", factor: 1.725 },
+        { key: "ath", label: "Muy alto (doble sesión)", factor: 1.9 },
+      ];
+
+      function bmrMifflin({ sex, weightKg, heightCm, age }) {
+        if (!(weightKg>0 && heightCm>0 && age>0)) return 0;
+        // Mifflin-St Jeor
+        const s = sex === "f" ? -161 : 5;
+        return 10*weightKg + 6.25*heightCm - 5*age + s;
+      }
+
+      function goalAdjust(goalKey) {
+        // Ajustes típicos
+        if (goalKey === "lose") return -450;
+        if (goalKey === "lose_fast") return -650;
+        if (goalKey === "gain") return +250;
+        return 0; // maintain
+      }
+
+      function proteinPerKg(goalKey, bmiKey) {
+        // Heurística simple para sostener masa magra:
+        // bajar: 1.8–2.2 g/kg; mantener: 1.6–1.8; subir: 1.8
+        if (goalKey.startsWith("lose")) return 2.0;
+        if (goalKey === "gain") return 1.8;
+        return 1.6;
+      }
+
+      /**********************
+       * Data Model
+       **********************/
+      const CATS = [
+        { key: "proteina", label: "Proteína" },
+        { key: "vegetal", label: "Vegetal" },
+        { key: "fruta", label: "Fruta" },
+        { key: "hidrato", label: "Hidrato" },
+        { key: "infusion", label: "Infusión" },
+        { key: "extra", label: "Extra" },
+      ];
+
+      const UNITS = [
+        { key: "g", label: "g" },
+        { key: "ml", label: "ml" },
+        { key: "u", label: "u" },
+      ];
+
+      const MEAL_TYPES = [
+        { key: "desayuno", label: "Desayuno", slots: ["proteina", "fruta", "infusion", "extra"] },
+        { key: "merienda", label: "Merienda", slots: ["proteina", "fruta", "infusion", "extra"] },
+        { key: "principal", label: "Plato principal", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
+        { key: "cena", label: "Cena", slots: ["proteina", "vegetal", "vegetal", "infusion", "extra"] },
+      ];
+
+      const DAYS = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
+
+      function defaultIngredients() {
+        // Lista base editable (podés sumar todo lo que quieras)
+        return [
+          // Proteínas
+          { id: uid(), name: "Pollo (pechuga)", category:"proteina", unit:"g", portionDefault:180, kcalPer100:165 },
+          { id: uid(), name: "Carne magra", category:"proteina", unit:"g", portionDefault:180, kcalPer100:190 },
+          { id: uid(), name: "Pescado", category:"proteina", unit:"g", portionDefault:200, kcalPer100:140 },
+          { id: uid(), name: "Huevo", category:"proteina", unit:"u", portionDefault:2, kcalPerUnit:70 },
+          { id: uid(), name: "Yogurt griego natural", category:"proteina", unit:"g", portionDefault:220, kcalPer100:70 },
+
+          // Vegetales
+          { id: uid(), name: "Ensalada mixta", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:25 },
+          { id: uid(), name: "Brócoli", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:35 },
+          { id: uid(), name: "Zapallito", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:20 },
+
+          // Frutas
+          { id: uid(), name: "Manzana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:95 },
+          { id: uid(), name: "Banana chica", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:90 },
+          { id: uid(), name: "Frutos rojos", category:"fruta", unit:"g", portionDefault:120, kcalPer100:50 },
+
+          // Hidratos
+          { id: uid(), name: "Arroz cocido", category:"hidrato", unit:"g", portionDefault:160, kcalPer100:130 },
+          { id: uid(), name: "Papa al horno", category:"hidrato", unit:"g", portionDefault:200, kcalPer100:110 },
+
+          // Infusiones
+          { id: uid(), name: "Mate", category:"infusion", unit:"ml", portionDefault:300, kcalPer100:0 },
+          { id: uid(), name: "Café", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:0 },
+          { id: uid(), name: "Té", category:"infusion", unit:"ml", portionDefault:250, kcalPer100:0 },
+
+          // Extras
+          { id: uid(), name: "Almendras", category:"extra", unit:"g", portionDefault:15, kcalPer100:580 },
+          { id: uid(), name: "Aceite de oliva", category:"extra", unit:"g", portionDefault:10, kcalPer100:884 },
+        ];
+      }
+
+      function defaultProfiles() {
+        return [
+          {
+            id: uid(),
+            name: "Darío",
+            sex: "m",
+            age: 35,
+            heightCm: 178,
+            weightKg: 92,
+            activityKey: "mod",
+            goalKey: "lose",
+          }
+        ];
+      }
+
+      function makeEmptyWeek() {
+        // week[dayIndex] = array of meals
+        return Array.from({length: 7}, () => []);
+      }
+
+      function defaultState() {
+        return {
+          profiles: defaultProfiles(),
+          activeProfileId: null,
+          ingredients: defaultIngredients(),
+          // plansByProfileId: { [id]: weekPlan }
+          plansByProfileId: {},
+        };
+      }
+
+      /**********************
+       * Components
+       **********************/
+      function Badge({ children }) {
+        return (
+          <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
+            {children}
+          </span>
+        );
+      }
+
+      function NumberField({ label, value, onChange, min, max, step=1, suffix }) {
+        // keep as string to allow typing
+        const [txt, setTxt] = useState(String(value ?? ""));
+        useEffect(() => setTxt(String(value ?? "")), [value]);
+
+        return (
+          <label className="block">
+            <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
+            <div className="flex items-center gap-2">
+              <input
+                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+                inputMode="decimal"
+                value={txt}
+                onChange={(e)=> setTxt(e.target.value)}
+                onBlur={()=>{
+                  const n = parseFloat(String(txt).replace(",", "."));
+                  if (!isFinite(n)) { setTxt(String(value ?? "")); return; }
+                  const nn = clamp(n, min ?? -1e9, max ?? 1e9);
+                  onChange(nn);
+                }}
+              />
+              {suffix ? <span className="text-sm text-zinc-500">{suffix}</span> : null}
+            </div>
+          </label>
+        );
+      }
+
+      function Select({ label, value, onChange, options }) {
+        return (
+          <label className="block">
+            <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
+            <select
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+              value={value}
+              onChange={(e)=> onChange(e.target.value)}
+            >
+              {options.map(o => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+        );
+      }
+
+      function TextField({ label, value, onChange, placeholder }) {
+        return (
+          <label className="block">
+            <div className="text-xs font-semibold text-zinc-700 mb-1">{label}</div>
+            <input
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+              value={value}
+              placeholder={placeholder}
+              onChange={(e)=> onChange(e.target.value)}
+            />
+          </label>
+        );
+      }
+
+      function Card({ title, right, children }) {
+        return (
+          <div className="rounded-2xl bg-white shadow-sm border border-zinc-100">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100">
+              <div className="font-semibold">{title}</div>
+              <div>{right}</div>
+            </div>
+            <div className="p-4">{children}</div>
+          </div>
+        );
+      }
+
+      /**********************
+       * Meal calculations
+       **********************/
+      function kcalForItem(ing, qty) {
+        if (!ing) return 0;
+        if (ing.unit === "u") {
+          const perU = ing.kcalPerUnit ?? 0;
+          return (qty ?? 0) * perU;
+        }
+        const per100 = ing.kcalPer100 ?? 0;
+        return ((qty ?? 0) * per100) / 100;
+      }
+
+      function mealTotals(meal, ingById) {
+        let kcal = 0;
+        for (const it of meal.items) {
+          const ing = ingById[it.ingredientId];
+          kcal += kcalForItem(ing, it.qty);
+        }
+        return { kcal: round(kcal, 0) };
+      }
+
+      /**********************
+       * App
+       **********************/
+      function App() {
+        const [state, setState] = useState(() => {
+          const raw = localStorage.getItem(LS_KEY);
+          const st = raw ? safeJsonParse(raw, null) : null;
+          const base = defaultState();
+          if (!st) return { ...base, activeProfileId: base.profiles[0]?.id ?? null };
+          // merge minimal
+          const merged = {
+            profiles: Array.isArray(st.profiles) && st.profiles.length ? st.profiles : base.profiles,
+            activeProfileId: st.activeProfileId ?? (st.profiles?.[0]?.id ?? base.profiles[0]?.id ?? null),
+            ingredients: Array.isArray(st.ingredients) && st.ingredients.length ? st.ingredients : base.ingredients,
+            plansByProfileId: st.plansByProfileId ?? {},
+          };
+          return merged;
+        });
+
+        useEffect(() => {
+          localStorage.setItem(LS_KEY, JSON.stringify(state));
+        }, [state]);
+
+        const profiles = state.profiles;
+        const activeProfile = profiles.find(p => p.id === state.activeProfileId) ?? profiles[0] ?? null;
+
+        // ensure plan exists for profile
+        useEffect(() => {
+          if (!activeProfile) return;
+          setState(s => {
+            const has = s.plansByProfileId?.[activeProfile.id];
+            if (has) return s;
+            return {
+              ...s,
+              plansByProfileId: { ...(s.plansByProfileId||{}), [activeProfile.id]: makeEmptyWeek() }
+            };
+          });
+          // eslint-disable-next-line
+        }, [activeProfile?.id]);
+
+        const weekPlan = activeProfile ? (state.plansByProfileId?.[activeProfile.id] ?? makeEmptyWeek()) : makeEmptyWeek();
+
+        const ingById = useMemo(() => {
+          const m = {};
+          for (const i of state.ingredients) m[i.id] = i;
+          return m;
+        }, [state.ingredients]);
+
+        const ingredientsByCat = useMemo(() => {
+          const m = {};
+          for (const c of CATS) m[c.key] = [];
+          for (const i of state.ingredients) (m[i.category] ??= []).push(i);
+          for (const k of Object.keys(m)) m[k].sort((a,b)=> a.name.localeCompare(b.name));
+          return m;
+        }, [state.ingredients]);
+
+        const profileStats = useMemo(() => {
+          if (!activeProfile) return null;
+          const hM = (activeProfile.heightCm ?? 0) / 100;
+          const bmi = hM>0 ? (activeProfile.weightKg / (hM*hM)) : 0;
+          const cat = bmiCategoryWHO(bmi);
+
+          const act = ACTIVITY.find(a => a.key === activeProfile.activityKey) ?? ACTIVITY[2];
+          const bmr = bmrMifflin({
+            sex: activeProfile.sex,
+            weightKg: activeProfile.weightKg,
+            heightCm: activeProfile.heightCm,
+            age: activeProfile.age,
+          });
+          const tdee = bmr * (act.factor ?? 1.55);
+          let target = tdee + goalAdjust(activeProfile.goalKey);
+          // guardrails (no extremos)
+          target = clamp(target, 1400, 3800);
+
+          const protKg = proteinPerKg(activeProfile.goalKey, cat.key);
+          const protG = round(activeProfile.weightKg * protKg, 0);
+
+          return {
+            bmi: round(bmi, 1),
+            bmiCat: cat,
+            bmr: round(bmr, 0),
+            tdee: round(tdee, 0),
+            targetKcal: round(target, 0),
+            proteinG: protG,
+          };
+        }, [activeProfile]);
+
+        const [tab, setTab] = useState("armador"); // armador | ingredientes | perfiles | compras
+
+        /**********************
+         * Profile actions
+         **********************/
+        function addProfile() {
+          const p = {
+            id: uid(),
+            name: "Nuevo perfil",
+            sex: "f",
+            age: 30,
+            heightCm: 165,
+            weightKg: 70,
+            activityKey: "light",
+            goalKey: "lose",
+          };
+          setState(s => ({
+            ...s,
+            profiles: [...s.profiles, p],
+            activeProfileId: p.id,
+            plansByProfileId: { ...(s.plansByProfileId||{}), [p.id]: makeEmptyWeek() }
+          }));
+        }
+
+        function updateProfile(id, patch) {
+          setState(s => ({
+            ...s,
+            profiles: s.profiles.map(p => p.id === id ? { ...p, ...patch } : p)
+          }));
+        }
+
+        function removeProfile(id) {
+          setState(s => {
+            const nextProfiles = s.profiles.filter(p => p.id !== id);
+            const nextActive = s.activeProfileId === id ? (nextProfiles[0]?.id ?? null) : s.activeProfileId;
+            const nextPlans = { ...(s.plansByProfileId||{}) };
+            delete nextPlans[id];
+            return { ...s, profiles: nextProfiles, activeProfileId: nextActive, plansByProfileId: nextPlans };
+          });
+        }
+
+        /**********************
+         * Ingredient actions
+         **********************/
+        function addIngredient() {
+          setState(s => ({
+            ...s,
+            ingredients: [
+              ...s.ingredients,
+              {
+                id: uid(),
+                name: "Nuevo ingrediente",
+                category: "proteina",
+                unit: "g",
+                portionDefault: 100,
+                kcalPer100: 100,
+              }
+            ]
+          }));
+        }
+
+        function updateIngredient(id, patch) {
+          setState(s => ({
+            ...s,
+            ingredients: s.ingredients.map(i => i.id === id ? { ...i, ...patch } : i)
+          }));
+        }
+
+        function removeIngredient(id) {
+          // Also remove from any meals
+          setState(s => {
+            const nextIngredients = s.ingredients.filter(i => i.id !== id);
+            const nextPlans = { ...(s.plansByProfileId||{}) };
+            for (const pid of Object.keys(nextPlans)) {
+              nextPlans[pid] = (nextPlans[pid] ?? []).map(dayMeals =>
+                (dayMeals ?? []).map(meal => ({
+                  ...meal,
+                  items: meal.items.filter(it => it.ingredientId !== id)
+                }))
+              );
+            }
+            return { ...s, ingredients: nextIngredients, plansByProfileId: nextPlans };
+          });
+        }
+
+        /**********************
+         * Meal builder
+         **********************/
+        const [builderType, setBuilderType] = useState("desayuno");
+        const builderDef = MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0];
+
+        const [builderItems, setBuilderItems] = useState(() => {
+          // one entry per slot
+          return builderDef.slots.map(cat => ({
+            slotCat: cat,
+            ingredientId: "",
+            qty: 0,
+          }));
+        });
+
+        // reset slots when meal type changes
+        useEffect(() => {
+          setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
+          // eslint-disable-next-line
+        }, [builderType]);
+
+        function pickIngredient(slotIdx, ingredientId) {
+          const ing = ingById[ingredientId];
+          setBuilderItems(prev => prev.map((it, i) => {
+            if (i !== slotIdx) return it;
+            const suggested = ing ? (ing.portionDefault ?? 0) : 0;
+            return { ...it, ingredientId, qty: suggested };
+          }));
+        }
+
+        function setQty(slotIdx, qty) {
+          setBuilderItems(prev => prev.map((it, i) => i===slotIdx ? { ...it, qty } : it));
+        }
+
+        const builderMeal = useMemo(() => {
+          const items = builderItems
+            .filter(it => it.ingredientId && it.qty > 0)
+            .map(it => ({ ingredientId: it.ingredientId, qty: it.qty }));
+          return { id: uid(), type: builderType, items, createdAt: Date.now() };
+        }, [builderItems, builderType]);
+
+        const builderTotals = useMemo(() => {
+          return mealTotals(builderMeal, ingById);
+        }, [builderMeal, ingById]);
+
+        const [dayIndex, setDayIndex] = useState(0);
+
+        function addMealToDay() {
+          if (!activeProfile) return;
+          if (!builderMeal.items.length) return alert("Elegí al menos 1 ingrediente con cantidad.");
+          setState(s => {
+            const pid = activeProfile.id;
+            const week = s.plansByProfileId?.[pid] ? [...s.plansByProfileId[pid]] : makeEmptyWeek();
+            const dayMeals = [...(week[dayIndex] ?? [])];
+            dayMeals.push(builderMeal);
+            week[dayIndex] = dayMeals;
+            return { ...s, plansByProfileId: { ...(s.plansByProfileId||{}), [pid]: week } };
+          });
+        }
+
+        function removeMealFromDay(idx) {
+          if (!activeProfile) return;
+          setState(s => {
+            const pid = activeProfile.id;
+            const week = [...(s.plansByProfileId?.[pid] ?? makeEmptyWeek())];
+            const dayMeals = [...(week[dayIndex] ?? [])];
+            dayMeals.splice(idx, 1);
+            week[dayIndex] = dayMeals;
+            return { ...s, plansByProfileId: { ...(s.plansByProfileId||{}), [pid]: week } };
+          });
+        }
+
+        const dayMeals = weekPlan?.[dayIndex] ?? [];
+        const dayKcal = useMemo(() => {
+          let sum = 0;
+          for (const m of dayMeals) sum += mealTotals(m, ingById).kcal;
+          return round(sum, 0);
+        }, [dayMeals, ingById]);
+
+        /**********************
+         * Shopping list
+         **********************/
+        const shopping = useMemo(() => {
+          if (!weekPlan) return [];
+          const map = new Map(); // ingId => qty
+          for (let d=0; d<7; d++) {
+            for (const meal of (weekPlan[d] ?? [])) {
+              for (const it of (meal.items ?? [])) {
+                map.set(it.ingredientId, (map.get(it.ingredientId) ?? 0) + (it.qty ?? 0));
+              }
+            }
+          }
+          const rows = [];
+          for (const [ingId, qty] of map.entries()) {
+            const ing = ingById[ingId];
+            if (!ing) continue;
+            rows.push({
+              category: ing.category,
+              ingredient: ing.name,
+              qty: round(qty, 0),
+              unit: ing.unit,
+            });
+          }
+          rows.sort((a,b)=> (a.category+a.ingredient).localeCompare(b.category+b.ingredient));
+          return rows;
+        }, [weekPlan, ingById]);
+
+        function exportShoppingCSV() {
+          const header = [["categoria","ingrediente","cantidad","unidad"]];
+          const data = shopping.map(r => [r.category, r.ingredient, r.qty, r.unit]);
+          downloadText("lista_compras.csv", toCSV([...header, ...data]), "text/csv");
+        }
+
+        function exportJSON() {
+          downloadText("platos_app_backup.json", JSON.stringify(state, null, 2), "application/json");
+        }
+
+        function importJSON(file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const obj = safeJsonParse(reader.result, null);
+            if (!obj || typeof obj !== "object") return alert("JSON inválido.");
+            // very light validation
+            if (!Array.isArray(obj.profiles) || !Array.isArray(obj.ingredients)) {
+              return alert("El JSON no parece ser un backup de esta app.");
+            }
+            setState({
+              profiles: obj.profiles,
+              activeProfileId: obj.activeProfileId ?? obj.profiles?.[0]?.id ?? null,
+              ingredients: obj.ingredients,
+              plansByProfileId: obj.plansByProfileId ?? {},
+            });
+          };
+          reader.readAsText(file);
+        }
+
+        /**********************
+         * UI
+         **********************/
+        return (
+          <div className="min-h-screen">
+            <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-zinc-100">
+              <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+                <div className="font-bold tracking-tight">Platos · Configurador</div>
+                <Badge>localStorage</Badge>
+                <div className="ml-auto flex items-center gap-2">
+                  <select
+                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                    value={state.activeProfileId ?? ""}
+                    onChange={(e)=> setState(s => ({ ...s, activeProfileId: e.target.value }))}
+                  >
+                    {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <button
+                    className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                    onClick={addProfile}
+                  >
+                    + Perfil
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-w-6xl mx-auto px-4 pb-3 flex flex-wrap gap-2">
+                {[
+                  { key:"armador", label:"Armador" },
+                  { key:"compras", label:"Compras" },
+                  { key:"ingredientes", label:"Ingredientes" },
+                  { key:"perfiles", label:"Perfiles" },
+                ].map(t => (
+                  <button
+                    key={t.key}
+                    onClick={()=> setTab(t.key)}
+                    className={[
+                      "px-3 py-1.5 rounded-full text-sm border",
+                      tab===t.key ? "bg-zinc-900 text-white border-zinc-900" : "bg-white border-zinc-200 hover:bg-zinc-50"
+                    ].join(" ")}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+
+                <div className="ml-auto flex items-center gap-2">
+                  <button className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50" onClick={exportJSON}>
+                    Exportar JSON
+                  </button>
+                  <label className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50 cursor-pointer">
+                    Importar JSON
+                    <input type="file" accept="application/json" className="hidden" onChange={(e)=> {
+                      const f = e.target.files?.[0];
+                      if (f) importJSON(f);
+                      e.target.value = "";
+                    }} />
+                  </label>
+                </div>
+              </div>
+            </header>
+
+            <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* LEFT: Profile Stats */}
+              <div className="lg:col-span-1 space-y-4">
+                <Card
+                  title="Perfil activo"
+                  right={<Badge>{activeProfile?.name ?? "—"}</Badge>}
+                >
+                  {!activeProfile ? (
+                    <div className="text-sm text-zinc-600">Creá un perfil para empezar.</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <Select
+                          label="Sexo"
+                          value={activeProfile.sex}
+                          onChange={(v)=> updateProfile(activeProfile.id, { sex: v })}
+                          options={[
+                            { key:"m", label:"Masculino" },
+                            { key:"f", label:"Femenino" },
+                          ]}
+                        />
+                        <NumberField
+                          label="Edad"
+                          value={activeProfile.age}
+                          onChange={(n)=> updateProfile(activeProfile.id, { age: n })}
+                          min={14} max={90} step={1}
+                          suffix="años"
+                        />
+                        <NumberField
+                          label="Altura"
+                          value={activeProfile.heightCm}
+                          onChange={(n)=> updateProfile(activeProfile.id, { heightCm: n })}
+                          min={120} max={220} step={1}
+                          suffix="cm"
+                        />
+                        <NumberField
+                          label="Peso"
+                          value={activeProfile.weightKg}
+                          onChange={(n)=> updateProfile(activeProfile.id, { weightKg: n })}
+                          min={35} max={250} step={0.1}
+                          suffix="kg"
+                        />
+                        <Select
+                          label="Actividad"
+                          value={activeProfile.activityKey}
+                          onChange={(v)=> updateProfile(activeProfile.id, { activityKey: v })}
+                          options={ACTIVITY.map(a => ({ key:a.key, label:`${a.label} (×${a.factor})` }))}
+                        />
+                        <Select
+                          label="Objetivo"
+                          value={activeProfile.goalKey}
+                          onChange={(v)=> updateProfile(activeProfile.id, { goalKey: v })}
+                          options={[
+                            { key:"lose", label:"Bajar (moderado)" },
+                            { key:"lose_fast", label:"Bajar (agresivo)" },
+                            { key:"maintain", label:"Mantener" },
+                            { key:"gain", label:"Subir (lean)" },
+                          ]}
+                        />
+                      </div>
+
+                      {profileStats ? (
+                        <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold">IMC</div>
+                            <div className="mono text-sm">{profileStats.bmi}</div>
+                          </div>
+                          <div className="text-sm text-zinc-700">{profileStats.bmiCat.label}</div>
+
+                          <div className="grid grid-cols-2 gap-2 pt-2">
+                            <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                              <div className="text-xs text-zinc-500">TDEE (estimado)</div>
+                              <div className="mono text-sm font-semibold">{profileStats.tdee} kcal</div>
+                            </div>
+                            <div className="rounded-lg bg-white border border-zinc-200 p-2">
+                              <div className="text-xs text-zinc-500">Objetivo diario</div>
+                              <div className="mono text-sm font-semibold">{profileStats.targetKcal} kcal</div>
+                            </div>
+                            <div className="rounded-lg bg-white border border-zinc-200 p-2 col-span-2">
+                              <div className="text-xs text-zinc-500">Proteína sugerida</div>
+                              <div className="mono text-sm font-semibold">{profileStats.proteinG} g/día</div>
+                              <div className="text-xs text-zinc-500 mt-1">
+                                Nota: estimación práctica. OMS se usa para clasificar IMC (adultos); calorías se estiman por fórmula + actividad.
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <button
+                        className="w-full rounded-xl border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+                        onClick={()=> {
+                          if (confirm("¿Eliminar este perfil?")) removeProfile(activeProfile.id);
+                        }}
+                      >
+                        Eliminar perfil
+                      </button>
+                    </div>
+                  )}
+                </Card>
+
+                {/* Day summary */}
+                {activeProfile && tab === "armador" ? (
+                  <Card title="Día seleccionado" right={<Badge>{DAYS[dayIndex]}</Badge>}>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {DAYS.map((d, i)=> (
+                        <button
+                          key={d}
+                          className={[
+                            "px-3 py-1.5 rounded-full text-sm border",
+                            dayIndex===i ? "bg-zinc-900 text-white border-zinc-900" : "bg-white border-zinc-200 hover:bg-zinc-50"
+                          ].join(" ")}
+                          onClick={()=> setDayIndex(i)}
+                        >
+                          {d.slice(0,3)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-zinc-600">Total kcal (día)</div>
+                      <div className="mono text-lg font-semibold">{dayKcal}</div>
+                    </div>
+                    {profileStats ? (
+                      <div className="mt-2 text-sm text-zinc-600">
+                        Objetivo día: <span className="mono font-semibold">{profileStats.targetKcal}</span> kcal
+                        {" · "}
+                        Diferencia:{" "}
+                        <span className={"mono font-semibold " + (dayKcal > profileStats.targetKcal ? "text-red-600" : "text-emerald-600")}>
+                          {dayKcal - profileStats.targetKcal}
+                        </span>
+                      </div>
+                    ) : null}
+                  </Card>
+                ) : null}
+              </div>
+
+              {/* RIGHT: Main area */}
+              <div className="lg:col-span-2 space-y-4">
+                {tab === "armador" && activeProfile ? (
+                  <>
+                    <Card
+                      title="Armador de comidas"
+                      right={
+                        <div className="flex items-center gap-2">
+                          <Select
+                            label=""
+                            value={builderType}
+                            onChange={setBuilderType}
+                            options={MEAL_TYPES.map(m => ({ key:m.key, label:m.label }))}
+                          />
+                        </div>
+                      }
+                    >
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {builderDef.slots.map((cat, idx) => {
+                          const slot = builderItems[idx];
+                          const list = ingredientsByCat[cat] ?? [];
+                          const catLabel = CATS.find(c => c.key===cat)?.label ?? cat;
+
+                          return (
+                            <div key={idx} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="text-xs font-semibold text-zinc-700">
+                                  {catLabel} <span className="text-zinc-400">· slot {idx+1}</span>
+                                </div>
+                                <Badge>{cat}</Badge>
+                              </div>
+
+                              <select
+                                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                value={slot.ingredientId}
+                                onChange={(e)=> pickIngredient(idx, e.target.value)}
+                              >
+                                <option value="">— elegir —</option>
+                                {list.map(ing => <option key={ing.id} value={ing.id}>{ing.name}</option>)}
+                              </select>
+
+                              <div className="mt-2 grid grid-cols-2 gap-2 items-end">
+                                <NumberField
+                                  label="Cantidad"
+                                  value={slot.qty}
+                                  onChange={(n)=> setQty(idx, n)}
+                                  min={0} max={2000}
+                                  suffix={slot.ingredientId ? (ingById[slot.ingredientId]?.unit ?? "") : ""}
+                                />
+                                <div className="rounded-xl border border-zinc-200 bg-white p-2">
+                                  <div className="text-xs text-zinc-500">kcal (slot)</div>
+                                  <div className="mono font-semibold">
+                                    {round(kcalForItem(ingById[slot.ingredientId], slot.qty), 0)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-3">
+                        <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
+                          <div className="text-xs text-zinc-500">kcal comida</div>
+                          <div className="mono text-lg font-semibold">{builderTotals.kcal}</div>
+                        </div>
+
+                        <button
+                          className="rounded-xl bg-emerald-600 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500"
+                          onClick={addMealToDay}
+                        >
+                          + Agregar al día ({DAYS[dayIndex]})
+                        </button>
+
+                        <button
+                          className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm hover:bg-zinc-50"
+                          onClick={()=> setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })))}
+                        >
+                          Limpiar
+                        </button>
+                      </div>
+                    </Card>
+
+                    <Card title={`Comidas del ${DAYS[dayIndex]}`} right={<Badge>{dayMeals.length} items</Badge>}>
+                      {dayMeals.length === 0 ? (
+                        <div className="text-sm text-zinc-600">Todavía no cargaste comidas para este día.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {dayMeals.map((m, idx) => {
+                            const def = MEAL_TYPES.find(x => x.key===m.type);
+                            const tot = mealTotals(m, ingById);
+
+                            return (
+                              <div key={m.id} className="rounded-xl border border-zinc-200 bg-white p-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="font-semibold">{def?.label ?? m.type}</div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge>{tot.kcal} kcal</Badge>
+                                    <button
+                                      className="rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
+                                      onClick={()=> removeMealFromDay(idx)}
+                                    >
+                                      Quitar
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="mt-2 text-sm text-zinc-700">
+                                  {m.items.map((it, i) => {
+                                    const ing = ingById[it.ingredientId];
+                                    return (
+                                      <div key={i} className="flex items-center justify-between border-b last:border-b-0 border-zinc-100 py-1">
+                                        <div>{ing?.name ?? "?"}</div>
+                                        <div className="mono text-zinc-600">
+                                          {round(it.qty, 0)} {ing?.unit ?? ""}
+                                          {" · "}
+                                          {round(kcalForItem(ing, it.qty), 0)} kcal
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </Card>
+                  </>
+                ) : null}
+
+                {tab === "compras" && activeProfile ? (
+                  <Card
+                    title="Lista de compras (semana)"
+                    right={
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                          onClick={exportShoppingCSV}
+                        >
+                          Descargar CSV
+                        </button>
+                      </div>
+                    }
+                  >
+                    {shopping.length === 0 ? (
+                      <div className="text-sm text-zinc-600">
+                        No hay comidas cargadas esta semana. Agregá comidas en “Armador” y se arma sola.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-zinc-500">
+                              <th className="py-2">Categoría</th>
+                              <th>Ingrediente</th>
+                              <th className="text-right">Cantidad</th>
+                              <th className="text-right">Unidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {shopping.map((r, i) => (
+                              <tr key={i} className="border-t border-zinc-100">
+                                <td className="py-2">{r.category}</td>
+                                <td>{r.ingredient}</td>
+                                <td className="text-right mono">{r.qty}</td>
+                                <td className="text-right">{r.unit}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                ) : null}
+
+                {tab === "ingredientes" ? (
+                  <Card
+                    title="Ingredientes permitidos (editable)"
+                    right={
+                      <button
+                        className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                        onClick={addIngredient}
+                      >
+                        + Ingrediente
+                      </button>
+                    }
+                  >
+                    <div className="text-sm text-zinc-600 mb-3">
+                      Acá definís la “biblioteca” de ingredientes. La app usa estos datos para sugerir porciones y calcular kcal.
+                    </div>
+
+                    <div className="space-y-3">
+                      {state.ingredients.map(ing => {
+                        const isUnit = ing.unit === "u";
+                        return (
+                          <div key={ing.id} className="rounded-xl border border-zinc-200 bg-white p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex-1">
+                                <TextField
+                                  label="Nombre"
+                                  value={ing.name}
+                                  onChange={(v)=> updateIngredient(ing.id, { name: v })}
+                                />
+                              </div>
+                              <button
+                                className="mt-6 rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
+                                onClick={()=> { if (confirm("¿Eliminar ingrediente?")) removeIngredient(ing.id); }}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+                              <Select
+                                label="Categoría"
+                                value={ing.category}
+                                onChange={(v)=> updateIngredient(ing.id, { category: v })}
+                                options={CATS.map(c => ({ key:c.key, label:c.label }))}
+                              />
+                              <Select
+                                label="Unidad"
+                                value={ing.unit}
+                                onChange={(v)=> {
+                                  if (v === "u") {
+                                    updateIngredient(ing.id, { unit: v, kcalPerUnit: ing.kcalPerUnit ?? 0 });
+                                  } else {
+                                    updateIngredient(ing.id, { unit: v, kcalPer100: ing.kcalPer100 ?? 0 });
+                                  }
+                                }}
+                                options={UNITS}
+                              />
+                              <NumberField
+                                label="Porción sugerida"
+                                value={ing.portionDefault ?? 0}
+                                onChange={(n)=> updateIngredient(ing.id, { portionDefault: n })}
+                                min={0} max={2000}
+                                suffix={ing.unit}
+                              />
+                              {isUnit ? (
+                                <NumberField
+                                  label="kcal por unidad"
+                                  value={ing.kcalPerUnit ?? 0}
+                                  onChange={(n)=> updateIngredient(ing.id, { kcalPerUnit: n })}
+                                  min={0} max={2000}
+                                />
+                              ) : (
+                                <NumberField
+                                  label="kcal por 100"
+                                  value={ing.kcalPer100 ?? 0}
+                                  onChange={(n)=> updateIngredient(ing.id, { kcalPer100: n })}
+                                  min={0} max={2000}
+                                  suffix={ing.unit === "ml" ? "ml" : "g"}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                ) : null}
+
+                {tab === "perfiles" ? (
+                  <Card title="Gestión de perfiles" right={<Badge>{profiles.length}</Badge>}>
+                    <div className="space-y-3">
+                      {profiles.map(p => (
+                        <div key={p.id} className="rounded-xl border border-zinc-200 bg-white p-3">
+                          <div className="flex items-center justify-between">
+                            <div className="font-semibold">{p.name}</div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                className="rounded-lg px-2 py-1 text-sm border border-zinc-200 hover:bg-zinc-50"
+                                onClick={()=> setState(s => ({ ...s, activeProfileId: p.id }))}
+                              >
+                                Activar
+                              </button>
+                              <button
+                                className="rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
+                                onClick={()=> { if (confirm("¿Eliminar perfil?")) removeProfile(p.id); }}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-2">
+                            <TextField label="Nombre" value={p.name} onChange={(v)=> updateProfile(p.id, { name: v })} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ) : null}
+              </div>
+            </main>
+
+            <footer className="max-w-6xl mx-auto px-4 pb-10">
+              <div className="text-xs text-zinc-500">
+                Guardado local (localStorage). Podés exportar/importar JSON para backup.
+              </div>
+            </footer>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
