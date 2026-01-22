@@ -30,15 +30,6 @@
        * Utils
        **********************/
       const LS_KEY = "platos_app_v3_dates_weights";
-      // Migración desde posibles keys viejas (si alguna vez cambiaste la key)
-      const LS_KEYS_OLD = [
-        "platos_app_v3",
-        "platos_app_v2_dates_weights",
-        "platos_app_v2_dates",
-        "platos_app_v2",
-        "platos_app_v1",
-      ];
-
       const uid = () => Math.random().toString(36).slice(2, 10);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -84,7 +75,6 @@
         return days[d.getDay()];
       }
       function monthLabel(ym){
-        // ym = YYYY-MM
         const [y,m] = ym.split("-");
         const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
         const mi = parseInt(m,10)-1;
@@ -148,47 +138,90 @@
         { key: "u", label: "u" },
       ];
 
-      // ✅ NUEVO ORDEN + RENOMBRE + "OTROS"
-      // Nota: ya no existe "principal"; se usa "almuerzo"
+      // ✅ Tipos como pediste
       const MEAL_TYPES = [
         { key: "desayuno", label: "Desayuno", slots: ["proteina", "fruta", "infusion", "extra"] },
         { key: "almuerzo", label: "Almuerzo", slots: ["proteina", "vegetal", "vegetal", "hidrato", "infusion", "extra"] },
         { key: "merienda", label: "Merienda", slots: ["proteina", "fruta", "infusion", "extra"] },
         { key: "cena", label: "Cena", slots: ["proteina", "vegetal", "vegetal", "infusion", "extra"] },
-        { key: "otros", label: "Otros", slots: ["proteina", "fruta", "extra", "infusion"] },
+        // ✅ "Otros" permite cargar de todo (dejás vacío lo que no uses)
+        { key: "otros", label: "Otros", slots: ["proteina", "vegetal", "fruta", "hidrato", "infusion", "extra"] },
       ];
 
       function defaultIngredients() {
         return [
-          // Proteínas
+          // ---------------------------
+          // Proteínas base
+          // ---------------------------
           { id: uid(), name: "Pollo (pechuga)", category:"proteina", unit:"g", portionDefault:180, kcalPer100:165 },
           { id: uid(), name: "Carne magra", category:"proteina", unit:"g", portionDefault:180, kcalPer100:190 },
           { id: uid(), name: "Pescado", category:"proteina", unit:"g", portionDefault:200, kcalPer100:140 },
           { id: uid(), name: "Huevo", category:"proteina", unit:"u", portionDefault:2, kcalPerUnit:70 },
-          { id: uid(), name: "Yogurt griego natural", category:"proteina", unit:"g", portionDefault:220, kcalPer100:70 },
+          { id: uid(), name: "Yogur griego natural", category:"proteina", unit:"g", portionDefault:200, kcalPer100:70 },
 
+          // ✅ Lácteos / yogures / bebidas tipo lácteo (proteína)
+          { id: uid(), name: "Yogur natural descremado", category:"proteina", unit:"g", portionDefault:200, kcalPer100:45 },
+          { id: uid(), name: "Yogur natural entero", category:"proteina", unit:"g", portionDefault:200, kcalPer100:60 },
+          { id: uid(), name: "Yogur bebible descremado", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:40 },
+          { id: uid(), name: "Yogur bebible entero", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:60 },
+          { id: uid(), name: "Leche descremada", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:35 },
+          { id: uid(), name: "Leche entera", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:60 },
+          { id: uid(), name: "Leche vegetal sin azúcar (almendra/soja)", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:30 },
+
+          // ---------------------------
           // Vegetales
+          // ---------------------------
           { id: uid(), name: "Ensalada mixta", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:25 },
           { id: uid(), name: "Brócoli", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:35 },
           { id: uid(), name: "Zapallito", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:20 },
 
-          // Frutas
+          // ---------------------------
+          // Frutas (más elegidas y variadas)
+          // ---------------------------
           { id: uid(), name: "Manzana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:95 },
-          { id: uid(), name: "Banana chica", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:90 },
-          { id: uid(), name: "Frutos rojos", category:"fruta", unit:"g", portionDefault:120, kcalPer100:50 },
+          { id: uid(), name: "Banana (mediana)", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:105 },
+          { id: uid(), name: "Naranja", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:62 },
+          { id: uid(), name: "Mandarina", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:40 },
+          { id: uid(), name: "Pera", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:100 },
+          { id: uid(), name: "Durazno", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:60 },
+          { id: uid(), name: "Kiwi", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:45 },
 
+          { id: uid(), name: "Frutillas", category:"fruta", unit:"g", portionDefault:150, kcalPer100:32 },
+          { id: uid(), name: "Arándanos", category:"fruta", unit:"g", portionDefault:120, kcalPer100:57 },
+          { id: uid(), name: "Uvas", category:"fruta", unit:"g", portionDefault:120, kcalPer100:69 },
+          { id: uid(), name: "Ananá", category:"fruta", unit:"g", portionDefault:150, kcalPer100:50 },
+          { id: uid(), name: "Melón", category:"fruta", unit:"g", portionDefault:200, kcalPer100:34 },
+          { id: uid(), name: "Sandía", category:"fruta", unit:"g", portionDefault:250, kcalPer100:30 },
+
+          // ---------------------------
           // Hidratos
+          // ---------------------------
           { id: uid(), name: "Arroz cocido", category:"hidrato", unit:"g", portionDefault:160, kcalPer100:130 },
           { id: uid(), name: "Papa al horno", category:"hidrato", unit:"g", portionDefault:200, kcalPer100:110 },
 
-          // Infusiones
+          // ✅ Dulces (hidrato)
+          { id: uid(), name: "Dulce de membrillo", category:"hidrato", unit:"g", portionDefault:40, kcalPer100:245 },
+
+          // ---------------------------
+          // Infusiones / bebidas sin kcal
+          // ---------------------------
+          { id: uid(), name: "Agua", category:"infusion", unit:"ml", portionDefault:500, kcalPer100:0 },
+          { id: uid(), name: "Agua con gas", category:"infusion", unit:"ml", portionDefault:500, kcalPer100:0 },
           { id: uid(), name: "Mate", category:"infusion", unit:"ml", portionDefault:300, kcalPer100:0 },
-          { id: uid(), name: "Café", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:0 },
+          { id: uid(), name: "Café (solo)", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:0 },
           { id: uid(), name: "Té", category:"infusion", unit:"ml", portionDefault:250, kcalPer100:0 },
 
+          // ---------------------------
           // Extras
+          // ---------------------------
           { id: uid(), name: "Almendras", category:"extra", unit:"g", portionDefault:15, kcalPer100:580 },
           { id: uid(), name: "Aceite de oliva", category:"extra", unit:"g", portionDefault:10, kcalPer100:884 },
+
+          // ✅ Bebidas con calorías (extra)
+          { id: uid(), name: "Jugo de naranja (natural)", category:"extra", unit:"ml", portionDefault:200, kcalPer100:45 },
+          { id: uid(), name: "Gaseosa común", category:"extra", unit:"ml", portionDefault:250, kcalPer100:42 },
+          { id: uid(), name: "Gaseosa light", category:"extra", unit:"ml", portionDefault:250, kcalPer100:0 },
+          { id: uid(), name: "Agua saborizada común", category:"extra", unit:"ml", portionDefault:500, kcalPer100:20 },
 
           // Alcohol (ejemplo)
           { id: uid(), name: "Vino tinto (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:85 },
@@ -208,13 +241,11 @@
             weightKg: 92,
             activityKey: "mod",
             goalKey: "lose",
-            // Registro inicial automático (peso inicial)
             weightLog: [{ date: t, weight: 92 }],
           }
         ];
       }
 
-      // Plan por perfil: fechas reales
       function makeEmptyPlanDates() {
         const t = todayStr();
         return {
@@ -244,18 +275,14 @@
         if (targetKcal < 2400) return "mid";
         return "high";
       }
-
-      // ✅ Cambiamos "principal" -> "almuerzo" y agregamos "otros"
       const PORTION_MULT = {
         desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
         merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
         cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-
         almuerzo: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-
-        otros: { proteina:{low:0.7, mid:0.8, high:0.9}, fruta:{low:0.7, mid:0.8, high:0.9}, infusion:{low:1, mid:1, high:1}, extra:{low:0.6, mid:0.7, high:0.8} },
+        // "otros" lo tratamos parecido a merienda (flexible)
+        otros: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, fruta:{low:0.9, mid:1.0, high:1.15}, hidrato:{low:0.8, mid:1.0, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
       };
-
       function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount=1 }) {
         if (!ing) return 0;
         const band = kcalBand(targetKcal);
@@ -298,6 +325,7 @@
         arr.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
         return arr.filter(x => x?.date && isFinite(x?.weight));
       }
+
       function upsertWeight(log, entry) {
         const arr = Array.isArray(log) ? [...log] : [];
         const idx = arr.findIndex(x => x.date === entry.date);
@@ -305,6 +333,7 @@
         else arr.push(entry);
         return sortWeightLog(arr);
       }
+
       function monthlyLast(log) {
         const sorted = sortWeightLog(log);
         const byMonth = new Map();
@@ -318,11 +347,13 @@
           .sort((a,b)=> a.ym.localeCompare(b.ym));
         return months;
       }
+
       function diffMonths(ymA, ymB) {
         const [y1,m1] = ymA.split("-").map(Number);
         const [y2,m2] = ymB.split("-").map(Number);
         return (y2 - y1)*12 + (m2 - m1);
       }
+
       function computeWeightStats(log) {
         const sorted = sortWeightLog(log);
         if (!sorted.length) return null;
@@ -441,78 +472,50 @@
       }
 
       /**********************
-       * Migration helpers
-       **********************/
-      function findStoredState() {
-        // 1) intento la key actual
-        let raw = localStorage.getItem(LS_KEY);
-        if (raw) return raw;
-
-        // 2) si no, busco keys viejas
-        for (const k of LS_KEYS_OLD) {
-          const old = localStorage.getItem(k);
-          if (old) return old;
-        }
-        return null;
-      }
-
-      function migrateMealTypeKey(mealType) {
-        // compatibilidad: si antes guardaste "principal", ahora es "almuerzo"
-        if (mealType === "principal") return "almuerzo";
-        return mealType;
-      }
-
-      function migrateState(st) {
-        const base = defaultState();
-        if (!st || typeof st !== "object") return base;
-
-        const migrated = { ...base, ...st };
-
-        if (!Array.isArray(migrated.profiles) || !migrated.profiles.length) migrated.profiles = base.profiles;
-        if (!Array.isArray(migrated.ingredients) || !migrated.ingredients.length) migrated.ingredients = base.ingredients;
-        if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
-        if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
-
-        // Ensure weightLog exists (baseline)
-        const t = todayStr();
-        migrated.profiles = migrated.profiles.map(p => {
-          const wl = sortWeightLog(p.weightLog);
-          if (wl.length) return { ...p, weightLog: wl };
-          const w = isFinite(p.weightKg) ? p.weightKg : 0;
-          return { ...p, weightLog: w>0 ? [{ date: t, weight: w }] : [] };
-        });
-
-        // Ensure plan exists per profile + migrate meal types inside meals
-        for (const p of migrated.profiles) {
-          if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
-
-          const pl = migrated.plansByProfileId[p.id];
-          if (pl?.mealsByDate) {
-            const mealsByDate = { ...pl.mealsByDate };
-            for (const ds of Object.keys(mealsByDate)) {
-              mealsByDate[ds] = (mealsByDate[ds] ?? []).map(m => ({
-                ...m,
-                type: migrateMealTypeKey(m.type),
-              }));
-            }
-            migrated.plansByProfileId[p.id] = { ...pl, mealsByDate };
-          }
-        }
-
-        return migrated;
-      }
-
-      /**********************
        * App
        **********************/
       function App() {
         const [state, setState] = useState(() => {
-          const raw = findStoredState();
+          const raw = localStorage.getItem(LS_KEY);
           const st = raw ? safeJsonParse(raw, null) : null;
-          return migrateState(st);
+          const base = defaultState();
+          if (!st) return base;
+
+          const migrated = { ...base, ...st };
+          if (!migrated.profiles?.length) migrated.profiles = base.profiles;
+          if (!migrated.ingredients?.length) migrated.ingredients = base.ingredients;
+          if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
+          if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
+
+          const t = todayStr();
+          migrated.profiles = migrated.profiles.map(p => {
+            const wl = sortWeightLog(p.weightLog);
+            if (wl.length) return { ...p, weightLog: wl };
+            const w = isFinite(p.weightKg) ? p.weightKg : 0;
+            return { ...p, weightLog: w>0 ? [{ date: t, weight: w }] : [] };
+          });
+
+          for (const p of migrated.profiles) {
+            if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
+          }
+
+          // ✅ MIGRACIÓN: comidas guardadas como "principal" -> "almuerzo"
+          for (const pid of Object.keys(migrated.plansByProfileId || {})) {
+            const pl = migrated.plansByProfileId[pid];
+            if (!pl?.mealsByDate) continue;
+            const mealsByDate = { ...pl.mealsByDate };
+            for (const ds of Object.keys(mealsByDate)) {
+              mealsByDate[ds] = (mealsByDate[ds] || []).map(m => {
+                if (m?.type === "principal") return { ...m, type: "almuerzo" };
+                return m;
+              });
+            }
+            migrated.plansByProfileId[pid] = { ...pl, mealsByDate };
+          }
+
+          return migrated;
         });
 
-        // Guardamos SIEMPRE en la key actual
         useEffect(() => {
           localStorage.setItem(LS_KEY, JSON.stringify(state));
         }, [state]);
@@ -575,9 +578,6 @@
 
         const [tab, setTab] = useState("armador");
 
-        /**********************
-         * Profiles
-         **********************/
         function addProfile() {
           const t = todayStr();
           const p = {
@@ -614,7 +614,6 @@
           });
         }
 
-        // Weight log actions
         const [weightDate, setWeightDate] = useState(todayStr());
         const [weightValue, setWeightValue] = useState(activeProfile?.weightKg ?? 0);
 
@@ -655,22 +654,12 @@
           });
         }
 
-        /**********************
-         * Ingredients
-         **********************/
         function addIngredient() {
           setState(s => ({
             ...s,
             ingredients: [
               ...s.ingredients,
-              {
-                id: uid(),
-                name: "Nuevo ingrediente",
-                category: "proteina",
-                unit: "g",
-                portionDefault: 100,
-                kcalPer100: 100,
-              }
+              { id: uid(), name: "Nuevo ingrediente", category: "proteina", unit: "g", portionDefault: 100, kcalPer100: 100 }
             ]
           }));
         }
@@ -700,9 +689,6 @@
           });
         }
 
-        /**********************
-         * Dates + Meals
-         **********************/
         const selectedDate = plan?.selectedDate ?? todayStr();
         const dateList = plan?.dateList ?? [todayStr()];
         const mealsToday = plan?.mealsByDate?.[selectedDate] ?? [];
@@ -790,15 +776,9 @@
           });
         }
 
-        /**********************
-         * Builder
-         **********************/
         const [builderType, setBuilderType] = useState("desayuno");
         const builderDef = MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0];
-
-        const [builderItems, setBuilderItems] = useState(() =>
-          builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 }))
-        );
+        const [builderItems, setBuilderItems] = useState(() => builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
 
         useEffect(() => {
           setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
@@ -880,9 +860,6 @@
           return round(sum, 0);
         }, [mealsToday, ingById]);
 
-        /**********************
-         * Shopping list
-         **********************/
         const shopping = useMemo(() => {
           if (!plan) return [];
           const sel = plan.selectedForShopping ?? {};
@@ -900,12 +877,7 @@
           for (const [ingId, qty] of map.entries()) {
             const ing = ingById[ingId];
             if (!ing) continue;
-            rows.push({
-              category: ing.category,
-              ingredient: ing.name,
-              qty: round(qty, 0),
-              unit: ing.unit,
-            });
+            rows.push({ category: ing.category, ingredient: ing.name, qty: round(qty, 0), unit: ing.unit });
           }
           rows.sort((a,b)=> (a.category+a.ingredient).localeCompare(b.category+b.ingredient));
           return rows;
@@ -928,13 +900,11 @@
             if (!Array.isArray(obj.profiles) || !Array.isArray(obj.ingredients)) {
               return alert("El JSON no parece ser un backup de esta app.");
             }
-            // pasamos por migración igualmente
-            const migrated = migrateState(obj);
             setState({
-              profiles: migrated.profiles,
-              activeProfileId: migrated.activeProfileId ?? migrated.profiles?.[0]?.id ?? null,
-              ingredients: migrated.ingredients,
-              plansByProfileId: migrated.plansByProfileId ?? {},
+              profiles: obj.profiles,
+              activeProfileId: obj.activeProfileId ?? obj.profiles?.[0]?.id ?? null,
+              ingredients: obj.ingredients,
+              plansByProfileId: obj.plansByProfileId ?? {},
             });
           };
           reader.readAsText(file);
@@ -1003,7 +973,7 @@
             </header>
 
             <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* LEFT: Profile + Weight report + calendar */}
+              {/* LEFT */}
               <div className="lg:col-span-1 space-y-4">
                 <Card title="Perfil activo" right={<Badge>{activeProfile?.name ?? "—"}</Badge>}>
                   {!activeProfile ? (
@@ -1070,7 +1040,6 @@
                         </div>
                       ) : null}
 
-                      {/* Weight report */}
                       <div className="rounded-xl bg-white border border-zinc-200 p-3 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="font-semibold">Reporte de peso</div>
@@ -1127,10 +1096,8 @@
                               </div>
                             </div>
 
-                            {/* Bars */}
                             <div className="pt-2">
                               <div className="text-xs font-semibold text-zinc-700 mb-2">Evolución por mes (vs inicial)</div>
-
                               <div className="space-y-2">
                                 {weightStats.months.map(m => {
                                   const delta = m.deltaVsInitial;
@@ -1178,7 +1145,6 @@
                               ) : null}
                             </div>
 
-                            {/* Log table */}
                             <div className="pt-3">
                               <div className="text-xs font-semibold text-zinc-700 mb-2">Registros (últimos 10)</div>
                               <div className="space-y-1">
@@ -1373,14 +1339,13 @@
                       ) : (
                         <div className="space-y-3">
                           {mealsToday.map((m, idx) => {
-                            const typeKey = migrateMealTypeKey(m.type);
-                            const def = MEAL_TYPES.find(x => x.key===typeKey);
-                            const tot = mealTotals({ ...m, type: typeKey }, ingById);
+                            const def = MEAL_TYPES.find(x => x.key===m.type);
+                            const tot = mealTotals(m, ingById);
 
                             return (
                               <div key={m.id} className="rounded-xl border border-zinc-200 bg-white p-3">
                                 <div className="flex items-center justify-between">
-                                  <div className="font-semibold">{def?.label ?? typeKey}</div>
+                                  <div className="font-semibold">{def?.label ?? m.type}</div>
                                   <div className="flex items-center gap-2">
                                     <Badge>{tot.kcal} kcal</Badge>
                                     <button
