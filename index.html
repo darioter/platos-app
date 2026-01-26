@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>Platos · Configurador (Local)</title>
+    <title>Platos · Diario (Local)</title>
 
     <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -11,6 +11,7 @@
     <!-- React 18 -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
     <!-- Babel JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
@@ -29,17 +30,32 @@
       /**********************
        * Utils
        **********************/
-      const LS_KEY = "platos_app_v4_presets_packs";
+      const LS_KEY = "platos_app_v3_dates_weights"; // mantenemos el mismo para NO perder datos
       const uid = () => Math.random().toString(36).slice(2, 10);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-
-      function safeJsonParse(s, fallback) {
-        try { return JSON.parse(s); } catch { return fallback; }
-      }
-      function round(n, d=0) {
+      const round = (n, d=0) => {
         if (!isFinite(n)) return 0;
         const m = Math.pow(10, d);
         return Math.round(n*m)/m;
+      };
+      function safeJsonParse(s, fallback) {
+        try { return JSON.parse(s); } catch { return fallback; }
+      }
+      function pad2(n){ return String(n).padStart(2,"0"); }
+      function todayStr(){
+        const d = new Date();
+        return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+      }
+      function weekdayLabel(dateStr){
+        const d = new Date(dateStr + "T00:00:00");
+        const days = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+        return days[d.getDay()];
+      }
+      function monthLabel(ym){
+        const [y,m] = ym.split("-");
+        const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+        const mi = parseInt(m,10)-1;
+        return `${months[mi] ?? m} ${y}`;
       }
       function downloadText(filename, text, mime="text/plain") {
         const blob = new Blob([text], { type: mime });
@@ -59,26 +75,6 @@
           return s;
         };
         return rows.map(r => r.map(esc).join(",")).join("\n");
-      }
-
-      function pad2(n){ return String(n).padStart(2,"0"); }
-      function todayStr(){
-        const d = new Date();
-        const y = d.getFullYear();
-        const m = pad2(d.getMonth()+1);
-        const da = pad2(d.getDate());
-        return `${y}-${m}-${da}`;
-      }
-      function weekdayLabel(dateStr){
-        const d = new Date(dateStr + "T00:00:00");
-        const days = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
-        return days[d.getDay()];
-      }
-      function monthLabel(ym){
-        const [y,m] = ym.split("-");
-        const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-        const mi = parseInt(m,10)-1;
-        return `${months[mi] ?? m} ${y}`;
       }
 
       /**********************
@@ -116,20 +112,20 @@
         return 0;
       }
       function proteinPerKg(goalKey) {
-        if (String(goalKey||"").startsWith("lose")) return 2.0;
+        if (goalKey.startsWith("lose")) return 2.0;
         if (goalKey === "gain") return 1.8;
         return 1.6;
       }
 
       /**********************
-       * Data Model
+       * Categories / Units
        **********************/
       const CATS = [
         { key: "proteina", label: "Proteína" },
         { key: "vegetal", label: "Vegetal" },
         { key: "fruta", label: "Fruta" },
         { key: "hidrato", label: "Hidrato" },
-        { key: "infusion", label: "Infusión/Bebida" },
+        { key: "infusion", label: "Infusión" },
         { key: "extra", label: "Extra" },
       ];
       const UNITS = [
@@ -138,81 +134,84 @@
         { key: "u", label: "u" },
       ];
 
-      // ✅ Tipos de comida solicitados: desayuno, almuerzo, merienda, cena, otros
-      const MEAL_TYPES = [
-        { key: "desayuno", label: "Desayuno", slots: ["proteina","fruta","infusion","extra"] },
-        { key: "almuerzo", label: "Almuerzo", slots: ["proteina","vegetal","vegetal","hidrato","infusion","extra"] },
-        { key: "merienda", label: "Merienda", slots: ["proteina","fruta","infusion","extra"] },
-        { key: "cena", label: "Cena", slots: ["proteina","vegetal","vegetal","infusion","extra"] },
-        // "Otros" permite cargar de todo rápidamente (y además podés agregar slots)
-        { key: "otros", label: "Otros", slots: ["proteina","vegetal","fruta","hidrato","infusion","extra"] },
+      // 5 columnas simples
+      const MEAL_COLS = [
+        { key: "desayuno", label: "Desayuno" },
+        { key: "almuerzo", label: "Almuerzo" },
+        { key: "merienda", label: "Merienda" },
+        { key: "cena", label: "Cena" },
+        { key: "extras", label: "Extras" },
       ];
 
+      // sugerencias de categorías por columna (no limita, solo filtra por default)
+      const DEFAULT_CAT_FILTER = {
+        desayuno: ["proteina","fruta","infusion","extra"],
+        merienda: ["proteina","fruta","infusion","extra"],
+        almuerzo: ["proteina","vegetal","hidrato","extra"],
+        cena: ["proteina","vegetal","infusion","extra"],
+        extras: ["proteina","vegetal","fruta","hidrato","infusion","extra"],
+      };
+
       /**********************
-       * Ingredients library (ampliada)
+       * Default ingredients (ampliado)
        **********************/
       function defaultIngredients() {
         return [
-          // --- PROTEÍNAS ---
+          // Proteínas
           { id: uid(), name: "Pollo (pechuga)", category:"proteina", unit:"g", portionDefault:180, kcalPer100:165 },
           { id: uid(), name: "Carne magra", category:"proteina", unit:"g", portionDefault:180, kcalPer100:190 },
-          { id: uid(), name: "Pescado (blanco)", category:"proteina", unit:"g", portionDefault:200, kcalPer100:120 },
-          { id: uid(), name: "Atún al natural (escurrido)", category:"proteina", unit:"g", portionDefault:160, kcalPer100:116 },
+          { id: uid(), name: "Pescado", category:"proteina", unit:"g", portionDefault:200, kcalPer100:140 },
+          { id: uid(), name: "Atún al natural", category:"proteina", unit:"g", portionDefault:120, kcalPer100:110 },
           { id: uid(), name: "Huevo", category:"proteina", unit:"u", portionDefault:2, kcalPerUnit:70 },
-          { id: uid(), name: "Claras (huevo)", category:"proteina", unit:"u", portionDefault:4, kcalPerUnit:17 },
+          { id: uid(), name: "Claras", category:"proteina", unit:"u", portionDefault:3, kcalPerUnit:17 },
           { id: uid(), name: "Yogur griego natural", category:"proteina", unit:"g", portionDefault:220, kcalPer100:70 },
-          { id: uid(), name: "Yogur natural descremado", category:"proteina", unit:"g", portionDefault:250, kcalPer100:45 },
-          { id: uid(), name: "Yogur bebible descremado", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:45 },
-          { id: uid(), name: "Leche descremada", category:"proteina", unit:"ml", portionDefault:250, kcalPer100:35 },
-          { id: uid(), name: "Queso untable descremado", category:"proteina", unit:"g", portionDefault:60, kcalPer100:145 },
+          { id: uid(), name: "Queso cottage / ricota magra", category:"proteina", unit:"g", portionDefault:150, kcalPer100:90 },
+          { id: uid(), name: "Hummus casero", category:"proteina", unit:"g", portionDefault:40, kcalPer100:240 },
 
-          // --- VEGETALES ---
+          // Vegetales
           { id: uid(), name: "Ensalada mixta", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:25 },
           { id: uid(), name: "Brócoli", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:35 },
           { id: uid(), name: "Zapallito", category:"vegetal", unit:"g", portionDefault:300, kcalPer100:20 },
-          { id: uid(), name: "Zanahoria", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:41 },
-          { id: uid(), name: "Tomate", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:18 },
-          { id: uid(), name: "Pepino", category:"vegetal", unit:"g", portionDefault:250, kcalPer100:16 },
-          { id: uid(), name: "Espinaca", category:"vegetal", unit:"g", portionDefault:200, kcalPer100:23 },
-          { id: uid(), name: "Morrón", category:"vegetal", unit:"g", portionDefault:200, kcalPer100:31 },
+          { id: uid(), name: "Tomate", category:"vegetal", unit:"g", portionDefault:200, kcalPer100:18 },
+          { id: uid(), name: "Zanahoria", category:"vegetal", unit:"g", portionDefault:180, kcalPer100:41 },
+          { id: uid(), name: "Espinaca", category:"vegetal", unit:"g", portionDefault:150, kcalPer100:23 },
 
-          // --- FRUTAS ---
+          // Frutas (variadas)
           { id: uid(), name: "Manzana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:95 },
-          { id: uid(), name: "Banana", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:105 },
-          { id: uid(), name: "Naranja", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:62 },
-          { id: uid(), name: "Mandarina", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:47 },
+          { id: uid(), name: "Banana chica", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:90 },
+          { id: uid(), name: "Naranja", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:80 },
+          { id: uid(), name: "Mandarina", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:40 },
           { id: uid(), name: "Pera", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:100 },
-          { id: uid(), name: "Kiwi", category:"fruta", unit:"u", portionDefault:2, kcalPerUnit:42 },
-          { id: uid(), name: "Durazno", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:60 },
-          { id: uid(), name: "Ananá", category:"fruta", unit:"g", portionDefault:200, kcalPer100:50 },
+          { id: uid(), name: "Kiwi", category:"fruta", unit:"u", portionDefault:1, kcalPerUnit:45 },
           { id: uid(), name: "Uvas", category:"fruta", unit:"g", portionDefault:150, kcalPer100:69 },
-          { id: uid(), name: "Frutillas", category:"fruta", unit:"g", portionDefault:200, kcalPer100:32 },
-          { id: uid(), name: "Arándanos", category:"fruta", unit:"g", portionDefault:120, kcalPer100:57 },
-          { id: uid(), name: "Frutos rojos (mix)", category:"fruta", unit:"g", portionDefault:120, kcalPer100:50 },
+          { id: uid(), name: "Frutillas", category:"fruta", unit:"g", portionDefault:160, kcalPer100:32 },
+          { id: uid(), name: "Frutos rojos", category:"fruta", unit:"g", portionDefault:120, kcalPer100:50 },
 
-          // --- HIDRATOS ---
+          // Hidratos
           { id: uid(), name: "Arroz cocido", category:"hidrato", unit:"g", portionDefault:160, kcalPer100:130 },
           { id: uid(), name: "Papa al horno", category:"hidrato", unit:"g", portionDefault:200, kcalPer100:110 },
           { id: uid(), name: "Batata al horno", category:"hidrato", unit:"g", portionDefault:200, kcalPer100:90 },
-          { id: uid(), name: "Avena", category:"hidrato", unit:"g", portionDefault:50, kcalPer100:389 },
+          { id: uid(), name: "Avena", category:"hidrato", unit:"g", portionDefault:60, kcalPer100:389 },
           { id: uid(), name: "Pan integral", category:"hidrato", unit:"g", portionDefault:60, kcalPer100:250 },
-          { id: uid(), name: "Dulce de membrillo", category:"hidrato", unit:"g", portionDefault:30, kcalPer100:260 },
+          { id: uid(), name: "Dulce de membrillo", category:"hidrato", unit:"g", portionDefault:30, kcalPer100:280 },
+          { id: uid(), name: "Bizcochuelo chocolate", category:"hidrato", unit:"g", portionDefault:80, kcalPer100:350 },
 
-          // --- INFUSIONES / BEBIDAS ---
-          { id: uid(), name: "Agua", category:"infusion", unit:"ml", portionDefault:350, kcalPer100:0 },
+          // Infusiones / bebidas
           { id: uid(), name: "Mate", category:"infusion", unit:"ml", portionDefault:300, kcalPer100:0 },
           { id: uid(), name: "Café", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:0 },
           { id: uid(), name: "Té", category:"infusion", unit:"ml", portionDefault:250, kcalPer100:0 },
-          { id: uid(), name: "Agua con gas", category:"infusion", unit:"ml", portionDefault:350, kcalPer100:0 },
-          { id: uid(), name: "Gaseosa zero", category:"infusion", unit:"ml", portionDefault:330, kcalPer100:0 },
+          { id: uid(), name: "Agua", category:"infusion", unit:"ml", portionDefault:500, kcalPer100:0 },
+          { id: uid(), name: "Leche descremada", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:35 },
+          { id: uid(), name: "Leche entera", category:"infusion", unit:"ml", portionDefault:200, kcalPer100:62 },
 
-          // --- EXTRAS ---
+          // Extras
           { id: uid(), name: "Almendras", category:"extra", unit:"g", portionDefault:15, kcalPer100:580 },
           { id: uid(), name: "Nueces", category:"extra", unit:"g", portionDefault:15, kcalPer100:654 },
-          { id: uid(), name: "Aceite de oliva", category:"extra", unit:"g", portionDefault:10, kcalPer100:884 },
           { id: uid(), name: "Mantequilla de maní", category:"extra", unit:"g", portionDefault:15, kcalPer100:588 },
+          { id: uid(), name: "Aceite de oliva", category:"extra", unit:"g", portionDefault:10, kcalPer100:884 },
+          { id: uid(), name: "Chocolate amargo", category:"extra", unit:"g", portionDefault:15, kcalPer100:600 },
 
-          // Alcohol (opcional)
+          // Alcohol
           { id: uid(), name: "Vino tinto (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:85 },
           { id: uid(), name: "Vino blanco (seco)", category:"extra", unit:"ml", portionDefault:150, kcalPer100:82 },
         ];
@@ -235,197 +234,34 @@
         ];
       }
 
-      // Plan por perfil: fechas reales
       function makeEmptyPlanDates() {
         const t = todayStr();
         return {
           selectedDate: t,
           dateList: [t],
           selectedForShopping: { [t]: true },
-          mealsByDate: { [t]: [] },
+          // entriesByDate: { [date]: { desayuno:[], almuerzo:[], merienda:[], cena:[], extras:[] } }
+          entriesByDate: { [t]: makeEmptyDayColumns() },
+        };
+      }
+      function makeEmptyDayColumns() {
+        const obj = {};
+        for (const c of MEAL_COLS) obj[c.key] = [];
+        return obj;
+      }
+
+      function defaultState() {
+        const prof = defaultProfiles();
+        return {
+          profiles: prof,
+          activeProfileId: prof[0]?.id ?? null,
+          ingredients: defaultIngredients(),
+          plansByProfileId: {},
         };
       }
 
       /**********************
-       * Presets (combinaciones prearmadas)
-       * - Se guardan por NOMBRE (match) para que no se rompan si cambian IDs
-       **********************/
-      function normalize(s){ return String(s||"").toLowerCase().trim(); }
-
-      function findIngredientIdByMatch(ingredients, category, matchText){
-        const m = normalize(matchText);
-        if (!m) return "";
-        const list = ingredients.filter(i => i.category === category);
-        let hit = list.find(i => normalize(i.name) === m);
-        if (hit) return hit.id;
-        hit = list.find(i => normalize(i.name).includes(m));
-        if (hit) return hit.id;
-        hit = ingredients.find(i => normalize(i.name).includes(m));
-        return hit ? hit.id : "";
-      }
-
-      function defaultPresets(){
-        return [
-          // DESAYUNOS
-          {
-            id: uid(),
-            mealType: "desayuno",
-            name: "Desayuno · Yogur + banana + café",
-            items: [
-              { slotCat: "proteina", match: "Yogur griego natural" },
-              { slotCat: "fruta", match: "Banana" },
-              { slotCat: "infusion", match: "Café" },
-            ],
-          },
-          {
-            id: uid(),
-            mealType: "desayuno",
-            name: "Desayuno · 2 huevos + manzana + mate",
-            items: [
-              { slotCat: "proteina", match: "Huevo" },
-              { slotCat: "fruta", match: "Manzana" },
-              { slotCat: "infusion", match: "Mate" },
-            ],
-          },
-          {
-            id: uid(),
-            mealType: "desayuno",
-            name: "Desayuno · Avena + leche + frutillas",
-            items: [
-              { slotCat: "hidrato", match: "Avena" },
-              { slotCat: "proteina", match: "Leche descremada" },
-              { slotCat: "fruta", match: "Frutillas" },
-              { slotCat: "infusion", match: "Café" },
-            ],
-          },
-
-          // MERIENDAS
-          {
-            id: uid(),
-            mealType: "merienda",
-            name: "Merienda · Yogur + arándanos + té",
-            items: [
-              { slotCat: "proteina", match: "Yogur natural descremado" },
-              { slotCat: "fruta", match: "Arándanos" },
-              { slotCat: "infusion", match: "Té" },
-            ],
-          },
-          {
-            id: uid(),
-            mealType: "merienda",
-            name: "Merienda · Leche + banana + café",
-            items: [
-              { slotCat: "proteina", match: "Leche descremada" },
-              { slotCat: "fruta", match: "Banana" },
-              { slotCat: "infusion", match: "Café" },
-            ],
-          },
-
-          // ALMUERZOS
-          {
-            id: uid(),
-            mealType: "almuerzo",
-            name: "Almuerzo · Pollo + ensalada + brócoli + arroz",
-            items: [
-              { slotCat: "proteina", match: "Pollo (pechuga)" },
-              { slotCat: "vegetal", match: "Ensalada mixta" },
-              { slotCat: "vegetal", match: "Brócoli" },
-              { slotCat: "hidrato", match: "Arroz cocido" },
-              { slotCat: "infusion", match: "Agua" },
-            ],
-          },
-          {
-            id: uid(),
-            mealType: "almuerzo",
-            name: "Almuerzo · Carne + zapallito + ensalada + papa",
-            items: [
-              { slotCat: "proteina", match: "Carne magra" },
-              { slotCat: "vegetal", match: "Zapallito" },
-              { slotCat: "vegetal", match: "Ensalada mixta" },
-              { slotCat: "hidrato", match: "Papa al horno" },
-              { slotCat: "infusion", match: "Agua" },
-            ],
-          },
-          {
-            id: uid(),
-            mealType: "almuerzo",
-            name: "Almuerzo · Atún + ensalada + batata",
-            items: [
-              { slotCat: "proteina", match: "Atún al natural" },
-              { slotCat: "vegetal", match: "Ensalada mixta" },
-              { slotCat: "hidrato", match: "Batata al horno" },
-              { slotCat: "infusion", match: "Agua con gas" },
-            ],
-          },
-
-          // CENAS
-          {
-            id: uid(),
-            mealType: "cena",
-            name: "Cena · Pescado + ensalada + agua",
-            items: [
-              { slotCat: "proteina", match: "Pescado (blanco)" },
-              { slotCat: "vegetal", match: "Ensalada mixta" },
-              { slotCat: "vegetal", match: "Tomate" },
-              { slotCat: "infusion", match: "Agua" },
-            ],
-          },
-          {
-            id: uid(),
-            mealType: "cena",
-            name: "Cena · 2 huevos + brócoli + té",
-            items: [
-              { slotCat: "proteina", match: "Huevo" },
-              { slotCat: "vegetal", match: "Brócoli" },
-              { slotCat: "infusion", match: "Té" },
-            ],
-          },
-
-          // OTROS (flex)
-          {
-            id: uid(),
-            mealType: "otros",
-            name: "Otros · Membrillo + yogur + café",
-            items: [
-              { slotCat: "hidrato", match: "Dulce de membrillo" },
-              { slotCat: "proteina", match: "Yogur griego natural" },
-              { slotCat: "infusion", match: "Café" },
-            ],
-          },
-        ];
-      }
-
-      /**********************
-       * Day Packs (día completo)
-       **********************/
-      function defaultDayPacks(){
-        return [
-          {
-            id: uid(),
-            name: "Pack · Déficit simple (clásico)",
-            // Cada meal usa un preset por tipo
-            byType: {
-              desayuno: "Desayuno · Yogur + banana + café",
-              almuerzo: "Almuerzo · Pollo + ensalada + brócoli + arroz",
-              merienda: "Merienda · Yogur + arándanos + té",
-              cena: "Cena · Pescado + ensalada + agua",
-            }
-          },
-          {
-            id: uid(),
-            name: "Pack · Alto en proteína (sin locuras)",
-            byType: {
-              desayuno: "Desayuno · 2 huevos + manzana + mate",
-              almuerzo: "Almuerzo · Carne + zapallito + ensalada + papa",
-              merienda: "Merienda · Leche + banana + café",
-              cena: "Cena · 2 huevos + brócoli + té",
-            }
-          },
-        ];
-      }
-
-      /**********************
-       * Porciones por escenario
+       * Portions (LOW/MID/HIGH) + suggestions
        **********************/
       function kcalBand(targetKcal) {
         if (!isFinite(targetKcal) || targetKcal <= 0) return "mid";
@@ -433,42 +269,37 @@
         if (targetKcal < 2400) return "mid";
         return "high";
       }
+
+      // multiplicadores por columna y categoría (simple, ajustable)
       const PORTION_MULT = {
-        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, hidrato:{low:0.8, mid:1.0, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, hidrato:{low:0.8, mid:1.0, high:1.2}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, hidrato:{low:0.7, mid:1.0, high:1.2}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        almuerzo: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
-        otros: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, hidrato:{low:0.7, mid:1.0, high:1.25}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        desayuno: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, hidrato:{low:0.85, mid:1.0, high:1.1}, vegetal:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        merienda: { proteina:{low:0.9, mid:1.0, high:1.1}, fruta:{low:0.9, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, hidrato:{low:0.85, mid:1.0, high:1.1}, vegetal:{low:1, mid:1, high:1}, extra:{low:0.8, mid:1.0, high:1.0} },
+        almuerzo: { proteina:{low:0.95, mid:1.05, high:1.2}, vegetal:{low:1.0, mid:1.15, high:1.3}, hidrato:{low:0.7, mid:1.0, high:1.25}, infusion:{low:1, mid:1, high:1}, fruta:{low:0.9, mid:1.0, high:1.15}, extra:{low:0.8, mid:1.0, high:1.0} },
+        cena: { proteina:{low:0.9, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.1, high:1.2}, hidrato:{low:0.6, mid:0.85, high:1.0}, infusion:{low:1, mid:1, high:1}, fruta:{low:0.9, mid:1.0, high:1.15}, extra:{low:0.8, mid:1.0, high:1.0} },
+        extras: { proteina:{low:0.85, mid:1.0, high:1.1}, vegetal:{low:1.0, mid:1.0, high:1.1}, hidrato:{low:0.8, mid:1.0, high:1.15}, infusion:{low:1, mid:1, high:1}, fruta:{low:0.9, mid:1.0, high:1.15}, extra:{low:0.8, mid:1.0, high:1.0} },
       };
 
-      function suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount=1 }) {
+      function suggestQty({ ing, mealCol, targetKcal }) {
         if (!ing) return 0;
         const band = kcalBand(targetKcal);
         const def = ing.portionDefault ?? 0;
-        const m = (PORTION_MULT[mealType]?.[slotCat]?.[band]) ?? 1.0;
-
-        if (slotCat === "vegetal" && vegSlotCount > 1) {
-          const total = def * m * 1.2;
-          return round(total / vegSlotCount, 0);
-        }
+        const cat = ing.category ?? "extra";
+        const m = (PORTION_MULT[mealCol]?.[cat]?.[band]) ?? 1.0;
         return round(def * m, 0);
       }
 
       /**********************
-       * Meal kcal
+       * Calories
        **********************/
       function kcalForItem(ing, qty) {
         if (!ing) return 0;
-        if (ing.unit === "u") {
-          const perU = ing.kcalPerUnit ?? 0;
-          return (qty ?? 0) * perU;
-        }
+        if (ing.unit === "u") return (qty ?? 0) * (ing.kcalPerUnit ?? 0);
         const per100 = ing.kcalPer100 ?? 0;
         return ((qty ?? 0) * per100) / 100;
       }
-      function mealTotals(meal, ingById) {
+      function entryTotals(entry, ingById) {
         let kcal = 0;
-        for (const it of (meal.items ?? [])) {
+        for (const it of (entry.items ?? [])) {
           const ing = ingById[it.ingredientId];
           kcal += kcalForItem(ing, it.qty);
         }
@@ -476,14 +307,13 @@
       }
 
       /**********************
-       * Weight stats (monthly + bars)
+       * Weight stats
        **********************/
       function sortWeightLog(log) {
         const arr = Array.isArray(log) ? [...log] : [];
         arr.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
         return arr.filter(x => x?.date && isFinite(x?.weight));
       }
-
       function upsertWeight(log, entry) {
         const arr = Array.isArray(log) ? [...log] : [];
         const idx = arr.findIndex(x => x.date === entry.date);
@@ -491,7 +321,6 @@
         else arr.push(entry);
         return sortWeightLog(arr);
       }
-
       function monthlyLast(log) {
         const sorted = sortWeightLog(log);
         const byMonth = new Map();
@@ -505,13 +334,11 @@
           .sort((a,b)=> a.ym.localeCompare(b.ym));
         return months;
       }
-
       function diffMonths(ymA, ymB) {
         const [y1,m1] = ymA.split("-").map(Number);
         const [y2,m2] = ymB.split("-").map(Number);
         return (y2 - y1)*12 + (m2 - m1);
       }
-
       function computeWeightStats(log) {
         const sorted = sortWeightLog(log);
         if (!sorted.length) return null;
@@ -545,28 +372,34 @@
         const maxLoss = Math.max(0, initial - minW);
         const maxGain = Math.max(0, maxW - initial);
 
-        return {
-          initial, current, totalDelta,
-          months: monthlyDeltas,
-          avgPerMonth,
-          best, worst,
-          maxLoss, maxGain
-        };
+        return { initial, current, totalDelta, months: monthlyDeltas, avgPerMonth, best, worst, maxLoss, maxGain };
       }
 
       /**********************
-       * Default State
+       * Image resize (for localStorage)
        **********************/
-      function defaultState() {
-        const prof = defaultProfiles();
-        return {
-          profiles: prof,
-          activeProfileId: prof[0]?.id ?? null,
-          ingredients: defaultIngredients(),
-          presets: defaultPresets(),
-          dayPacks: defaultDayPacks(),
-          plansByProfileId: {},
-        };
+      async function fileToResizedDataURL(file, maxSize=900, quality=0.75) {
+        const img = await new Promise((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = rej;
+          i.src = URL.createObjectURL(file);
+        });
+
+        const w = img.width, h = img.height;
+        const scale = Math.min(1, maxSize / Math.max(w,h));
+        const cw = Math.round(w * scale);
+        const ch = Math.round(h * scale);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, cw, ch);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        URL.revokeObjectURL(img.src);
+        return dataUrl;
       }
 
       /**********************
@@ -644,6 +477,41 @@
         );
       }
 
+      function IconSearch({ className="" }) {
+        return (
+          <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" strokeWidth="2" />
+            <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        );
+      }
+
+      function Modal({ open, title, onClose, children, footer }) {
+        if (!open) return null;
+        return (
+          <div className="fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+            <div className="absolute inset-0 flex items-center justify-center p-4">
+              <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl border border-zinc-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
+                  <div className="font-semibold">{title}</div>
+                  <button
+                    className="rounded-lg border border-zinc-200 px-2 py-1 text-sm hover:bg-zinc-50"
+                    onClick={onClose}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+                <div className="p-4 max-h-[70vh] overflow-auto">
+                  {children}
+                </div>
+                {footer ? <div className="px-4 py-3 border-t border-zinc-100">{footer}</div> : null}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       /**********************
        * App
        **********************/
@@ -651,24 +519,23 @@
         const [state, setState] = useState(() => {
           const raw = localStorage.getItem(LS_KEY);
           const st = raw ? safeJsonParse(raw, null) : null;
+
           const base = defaultState();
           if (!st) {
-            // crear plan por perfil
-            const plans = {};
-            for (const p of base.profiles) plans[p.id] = makeEmptyPlanDates();
-            return { ...base, plansByProfileId: plans };
+            // init plans
+            const init = { ...base, plansByProfileId: {} };
+            for (const p of init.profiles) init.plansByProfileId[p.id] = makeEmptyPlanDates();
+            return init;
           }
 
-          // Migración segura: preserva lo existente
+          // Merge
           const migrated = { ...base, ...st };
-
           if (!migrated.profiles?.length) migrated.profiles = base.profiles;
           if (!migrated.ingredients?.length) migrated.ingredients = base.ingredients;
           if (!migrated.activeProfileId) migrated.activeProfileId = migrated.profiles[0]?.id ?? null;
           if (!migrated.plansByProfileId) migrated.plansByProfileId = {};
-          if (!Array.isArray(migrated.presets) || migrated.presets.length === 0) migrated.presets = base.presets;
-          if (!Array.isArray(migrated.dayPacks) || migrated.dayPacks.length === 0) migrated.dayPacks = base.dayPacks;
 
+          // Ensure weightLog exists
           const t = todayStr();
           migrated.profiles = migrated.profiles.map(p => {
             const wl = sortWeightLog(p.weightLog);
@@ -677,8 +544,58 @@
             return { ...p, weightLog: w>0 ? [{ date: t, weight: w }] : [] };
           });
 
+          // Ensure plan exists per profile
           for (const p of migrated.profiles) {
             if (!migrated.plansByProfileId[p.id]) migrated.plansByProfileId[p.id] = makeEmptyPlanDates();
+          }
+
+          // MIGRACIÓN desde versión vieja (mealsByDate con "principal")
+          // Si existe mealsByDate, lo convertimos a entriesByDate con columnas.
+          for (const pid of Object.keys(migrated.plansByProfileId)) {
+            const pl = migrated.plansByProfileId[pid];
+            if (pl?.entriesByDate) {
+              // asegurar columnas por fecha
+              const next = { ...pl.entriesByDate };
+              for (const ds of Object.keys(next)) {
+                next[ds] = { ...makeEmptyDayColumns(), ...(next[ds] || {}) };
+              }
+              migrated.plansByProfileId[pid] = { ...pl, entriesByDate: next };
+              continue;
+            }
+
+            if (pl?.mealsByDate) {
+              const entriesByDate = {};
+              for (const ds of Object.keys(pl.mealsByDate)) {
+                const dayCols = makeEmptyDayColumns();
+                const meals = pl.mealsByDate[ds] || [];
+                for (const m of meals) {
+                  // map type -> columna
+                  const type = m.type;
+                  let col = "extras";
+                  if (type === "desayuno") col = "desayuno";
+                  else if (type === "merienda") col = "merienda";
+                  else if (type === "cena") col = "cena";
+                  else if (type === "principal") col = "almuerzo"; // lo que pediste
+                  else col = "extras";
+
+                  dayCols[col].push({
+                    id: m.id || uid(),
+                    mealCol: col,
+                    title: "",
+                    photoDataUrl: "",
+                    source: "manual",
+                    items: (m.items || []).map(it => ({ ingredientId: it.ingredientId, qty: it.qty })),
+                    notes: "",
+                    createdAt: m.createdAt || Date.now(),
+                  });
+                }
+                entriesByDate[ds] = dayCols;
+              }
+
+              const cleaned = { ...pl };
+              delete cleaned.mealsByDate;
+              migrated.plansByProfileId[pid] = { ...cleaned, entriesByDate };
+            }
           }
 
           return migrated;
@@ -694,14 +611,6 @@
         const ingById = useMemo(() => {
           const m = {};
           for (const i of state.ingredients) m[i.id] = i;
-          return m;
-        }, [state.ingredients]);
-
-        const ingredientsByCat = useMemo(() => {
-          const m = {};
-          for (const c of CATS) m[c.key] = [];
-          for (const i of state.ingredients) (m[i.category] ??= []).push(i);
-          for (const k of Object.keys(m)) m[k].sort((a,b)=> a.name.localeCompare(b.name));
           return m;
         }, [state.ingredients]);
 
@@ -744,7 +653,7 @@
           return state.plansByProfileId?.[activeProfile.id] ?? null;
         }, [state.plansByProfileId, activeProfile]);
 
-        const [tab, setTab] = useState("armador");
+        const [tab, setTab] = useState("dia");
 
         /**********************
          * Profiles
@@ -785,10 +694,11 @@
           });
         }
 
-        // Weight log actions
+        /**********************
+         * Weight log actions
+         **********************/
         const [weightDate, setWeightDate] = useState(todayStr());
         const [weightValue, setWeightValue] = useState(activeProfile?.weightKg ?? 0);
-
         useEffect(() => {
           setWeightDate(todayStr());
           setWeightValue(activeProfile?.weightKg ?? 0);
@@ -829,21 +739,8 @@
         /**********************
          * Ingredients
          **********************/
-        function addIngredient() {
-          setState(s => ({
-            ...s,
-            ingredients: [
-              ...s.ingredients,
-              {
-                id: uid(),
-                name: "Nuevo ingrediente",
-                category: "proteina",
-                unit: "g",
-                portionDefault: 100,
-                kcalPer100: 100,
-              }
-            ]
-          }));
+        function addIngredient(ing) {
+          setState(s => ({ ...s, ingredients: [...s.ingredients, ing] }));
         }
         function updateIngredient(id, patch) {
           setState(s => ({
@@ -855,51 +752,76 @@
           setState(s => {
             const nextIngredients = s.ingredients.filter(i => i.id !== id);
             const nextPlans = { ...(s.plansByProfileId||{}) };
+
+            // limpiar de entradas
             for (const pid of Object.keys(nextPlans)) {
               const pl = nextPlans[pid];
-              if (!pl?.mealsByDate) continue;
-              const mealsByDate = { ...pl.mealsByDate };
-              for (const ds of Object.keys(mealsByDate)) {
-                mealsByDate[ds] = (mealsByDate[ds] ?? []).map(meal => ({
-                  ...meal,
-                  items: (meal.items ?? []).filter(it => it.ingredientId !== id)
-                }));
+              if (!pl?.entriesByDate) continue;
+              const entriesByDate = { ...pl.entriesByDate };
+              for (const ds of Object.keys(entriesByDate)) {
+                const cols = { ...entriesByDate[ds] };
+                for (const colKey of Object.keys(cols)) {
+                  cols[colKey] = (cols[colKey] || []).map(en => ({
+                    ...en,
+                    items: (en.items || []).filter(it => it.ingredientId !== id)
+                  }));
+                }
+                entriesByDate[ds] = cols;
               }
-              nextPlans[pid] = { ...pl, mealsByDate };
+              nextPlans[pid] = { ...pl, entriesByDate };
             }
+
             return { ...s, ingredients: nextIngredients, plansByProfileId: nextPlans };
           });
         }
 
         /**********************
-         * Dates + Meals
+         * Dates + Day entries
          **********************/
         const selectedDate = plan?.selectedDate ?? todayStr();
         const dateList = plan?.dateList ?? [todayStr()];
-        const mealsToday = plan?.mealsByDate?.[selectedDate] ?? [];
+        const entriesToday = plan?.entriesByDate?.[selectedDate] ?? makeEmptyDayColumns();
 
-        function ensureDate(ds) {
+        function setSelectedDate(ds) {
           if (!activeProfile) return;
           setState(s => {
             const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
-            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
-            if (!mealsByDate[ds]) mealsByDate[ds] = [];
+            const entriesByDate = { ...(pl.entriesByDate ?? {}) };
+            if (!entriesByDate[ds]) entriesByDate[ds] = makeEmptyDayColumns();
+            else entriesByDate[ds] = { ...makeEmptyDayColumns(), ...(entriesByDate[ds]||{}) };
+
             const dateList2 = pl.dateList?.includes(ds) ? pl.dateList : [ds, ...(pl.dateList ?? [])];
+            const selShop = { ...(pl.selectedForShopping ?? {}) };
+            if (selShop[ds] === undefined) selShop[ds] = true;
+
+            return {
+              ...s,
+              plansByProfileId: {
+                ...(s.plansByProfileId||{}),
+                [activeProfile.id]: { ...pl, selectedDate: ds, dateList: dateList2, entriesByDate, selectedForShopping: selShop }
+              }
+            };
+          });
+        }
+        function addDateToList(ds) {
+          if (!activeProfile) return;
+          setState(s => {
+            const pl = s.plansByProfileId?.[activeProfile.id] ?? makeEmptyPlanDates();
+            const dateList2 = pl.dateList?.includes(ds) ? pl.dateList : [ds, ...(pl.dateList ?? [])];
+            const entriesByDate = { ...(pl.entriesByDate ?? {}) };
+            if (!entriesByDate[ds]) entriesByDate[ds] = makeEmptyDayColumns();
+            else entriesByDate[ds] = { ...makeEmptyDayColumns(), ...(entriesByDate[ds]||{}) };
             const selShop = { ...(pl.selectedForShopping ?? {}) };
             if (selShop[ds] === undefined) selShop[ds] = true;
             return {
               ...s,
               plansByProfileId: {
                 ...(s.plansByProfileId||{}),
-                [activeProfile.id]: { ...pl, selectedDate: ds, dateList: dateList2, mealsByDate, selectedForShopping: selShop }
+                [activeProfile.id]: { ...pl, dateList: dateList2, entriesByDate, selectedForShopping: selShop }
               }
             };
           });
         }
-
-        function setSelectedDate(ds) { ensureDate(ds); }
-        function addDateToList(ds) { ensureDate(ds); }
-
         function toggleShopDate(ds) {
           if (!activeProfile) return;
           setState(s => {
@@ -948,341 +870,181 @@
         }
 
         /**********************
-         * Builder + Presets
+         * Add/Edit Entry Modal
          **********************/
         const targetKcal = profileStats?.targetKcal ?? 2100;
 
-        const [builderType, setBuilderType] = useState("desayuno");
-        const builderDef = useMemo(() => MEAL_TYPES.find(m => m.key === builderType) ?? MEAL_TYPES[0], [builderType]);
+        const [entryModalOpen, setEntryModalOpen] = useState(false);
+        const [entryModalCol, setEntryModalCol] = useState("desayuno");
+        const [editingEntryId, setEditingEntryId] = useState(null);
 
-        // slots editables (para "otros" y también para corregir manualmente estructura si querés)
-        const [builderSlots, setBuilderSlots] = useState(builderDef.slots);
-        useEffect(() => setBuilderSlots(builderDef.slots), [builderDef.key]);
+        const emptyDraft = () => ({
+          id: uid(),
+          mealCol: entryModalCol,
+          title: "",
+          photoDataUrl: "",
+          source: "manual", // manual | foto
+          notes: "",
+          items: [], // { ingredientId, qty }
+          createdAt: Date.now(),
+        });
 
-        const [builderItems, setBuilderItems] = useState(() =>
-          builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 }))
-        );
+        const [draft, setDraft] = useState(emptyDraft());
+        const [ingSearch, setIngSearch] = useState("");
+        const [catFilter, setCatFilter] = useState(DEFAULT_CAT_FILTER[entryModalCol] || DEFAULT_CAT_FILTER.extras);
 
-        // Reset cuando cambia el tipo
-        useEffect(() => {
-          setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
-          setBuilderSlots(builderDef.slots);
-          // eslint-disable-next-line
-        }, [builderType]);
-
-        const presetsForType = useMemo(() => {
-          const all = Array.isArray(state.presets) ? state.presets : [];
-          return all.filter(p => p.mealType === builderType).sort((a,b)=> a.name.localeCompare(b.name));
-        }, [state.presets, builderType]);
-
-        const [selectedPresetId, setSelectedPresetId] = useState("");
-        useEffect(() => {
-          const first = presetsForType[0]?.id ?? "";
-          setSelectedPresetId(first);
-        }, [builderType, presetsForType.length]);
-
-        function setSlotCat(idx, catKey) {
-          setBuilderSlots(prev => prev.map((c,i)=> i===idx ? catKey : c));
-          setBuilderItems(prev => prev.map((it,i)=> i===idx ? { slotCat: catKey, ingredientId:"", qty:0 } : it));
+        function openAddEntry(colKey) {
+          setEntryModalCol(colKey);
+          setEditingEntryId(null);
+          setIngSearch("");
+          setCatFilter(DEFAULT_CAT_FILTER[colKey] || DEFAULT_CAT_FILTER.extras);
+          setDraft({
+            id: uid(),
+            mealCol: colKey,
+            title: "",
+            photoDataUrl: "",
+            source: "manual",
+            notes: "",
+            items: [],
+            createdAt: Date.now(),
+          });
+          setEntryModalOpen(true);
         }
 
-        function addSlot() {
-          setBuilderSlots(prev => [...prev, "extra"]);
-          setBuilderItems(prev => [...prev, { slotCat: "extra", ingredientId:"", qty:0 }]);
-        }
-        function removeSlot(idx) {
-          setBuilderSlots(prev => prev.filter((_,i)=> i!==idx));
-          setBuilderItems(prev => prev.filter((_,i)=> i!==idx));
+        function openEditEntry(colKey, entry) {
+          setEntryModalCol(colKey);
+          setEditingEntryId(entry.id);
+          setIngSearch("");
+          setCatFilter(DEFAULT_CAT_FILTER[colKey] || DEFAULT_CAT_FILTER.extras);
+          setDraft({
+            id: entry.id,
+            mealCol: colKey,
+            title: entry.title || "",
+            photoDataUrl: entry.photoDataUrl || "",
+            source: entry.source || (entry.photoDataUrl ? "foto" : "manual"),
+            notes: entry.notes || "",
+            items: (entry.items || []).map(it => ({ ingredientId: it.ingredientId, qty: it.qty })),
+            createdAt: entry.createdAt || Date.now(),
+          });
+          setEntryModalOpen(true);
         }
 
-        function pickIngredient(slotIdx, ingredientId) {
-          const slotCat = builderSlots[slotIdx];
+        function closeEntryModal() {
+          setEntryModalOpen(false);
+          setEditingEntryId(null);
+        }
+
+        async function handlePhotoUpload(file) {
+          if (!file) return;
+          try {
+            const dataUrl = await fileToResizedDataURL(file, 900, 0.75);
+            setDraft(d => ({ ...d, photoDataUrl: dataUrl, source: "foto" }));
+          } catch (e) {
+            alert("No se pudo procesar la foto.");
+          }
+        }
+
+        function addDraftItem(ingredientId) {
+          if (!ingredientId) return;
+          const exists = draft.items.some(it => it.ingredientId === ingredientId);
+          if (exists) return;
+
           const ing = ingById[ingredientId];
-          const vegSlots = builderSlots.filter(s => s === "vegetal").length;
+          const suggested = suggestQty({ ing, mealCol: entryModalCol, targetKcal });
 
-          setBuilderItems(prev => prev.map((it, i) => {
-            if (i !== slotIdx) return it;
-            const suggested = ing
-              ? suggestQty({ ing, mealType: builderType, slotCat, targetKcal, vegSlotCount: vegSlots })
-              : 0;
-            return { ...it, ingredientId, qty: suggested };
+          setDraft(d => ({
+            ...d,
+            items: [...d.items, { ingredientId, qty: suggested }]
           }));
         }
-        function setQty(slotIdx, qty) {
-          setBuilderItems(prev => prev.map((it, i) => i===slotIdx ? { ...it, qty } : it));
+
+        function updateDraftQty(ingredientId, qty) {
+          setDraft(d => ({
+            ...d,
+            items: d.items.map(it => it.ingredientId === ingredientId ? { ...it, qty } : it)
+          }));
         }
 
-        function applyPreset(presetId) {
-          const preset = (state.presets ?? []).find(p => p.id === presetId);
-          if (!preset) return;
+        function removeDraftItem(ingredientId) {
+          setDraft(d => ({ ...d, items: d.items.filter(it => it.ingredientId !== ingredientId) }));
+        }
 
-          const vegSlotsCount = builderDef.slots.filter(s => s === "vegetal").length;
-
-          // usar slots base del tipo (para que siempre aplique bien)
-          const baseSlots = builderDef.slots.slice();
-          const next = baseSlots.map(slotCat => ({ slotCat, ingredientId:"", qty:0 }));
-
-          for (const pIt of (preset.items ?? [])) {
-            const slotCat = pIt.slotCat;
-            const idx = next.findIndex(x => x.slotCat === slotCat && !x.ingredientId);
-            if (idx < 0) continue;
-
-            const ingId = findIngredientIdByMatch(state.ingredients, slotCat, pIt.match);
-            if (!ingId) continue;
-
-            const ing = ingById[ingId];
-            const suggested = ing
-              ? suggestQty({ ing, mealType: builderType, slotCat, targetKcal, vegSlotCount: vegSlotsCount })
-              : 0;
-
-            next[idx] = { ...next[idx], ingredientId: ingId, qty: suggested };
+        function saveDraftToDay() {
+          if (!activeProfile) return;
+          // permitir entrada solo con foto (sin items) si quiere
+          if (!draft.photoDataUrl && (!draft.items || !draft.items.length) && !draft.title.trim()) {
+            return alert("Sumá al menos una foto, un ingrediente o un título.");
           }
-
-          setBuilderSlots(baseSlots);
-          setBuilderItems(next);
-        }
-
-        function saveCurrentAsPreset() {
-          const name = prompt("Nombre del preset (ej: 'Desayuno · Yogur + banana'):");
-          if (!name) return;
-
-          const items = builderItems
-            .filter(it => it.ingredientId && it.qty > 0)
-            .map(it => {
-              const ing = ingById[it.ingredientId];
-              return { slotCat: it.slotCat, match: ing?.name ?? "" };
-            })
-            .filter(x => x.match);
-
-          if (!items.length) return alert("No hay ingredientes cargados para guardar como preset.");
-
-          const preset = { id: uid(), mealType: builderType, name, items };
-
-          setState(s => ({
-            ...s,
-            presets: [preset, ...(s.presets ?? [])],
-          }));
-
-          setSelectedPresetId(preset.id);
-        }
-
-        function deletePreset(presetId) {
-          const preset = (state.presets ?? []).find(p => p.id === presetId);
-          if (!preset) return;
-          if (!confirm(`¿Eliminar preset "${preset.name}"?`)) return;
-
-          setState(s => ({
-            ...s,
-            presets: (s.presets ?? []).filter(p => p.id !== presetId),
-          }));
-          setSelectedPresetId("");
-        }
-
-        // builder meal object
-        const builderMeal = useMemo(() => {
-          const items = builderItems
-            .filter(it => it?.ingredientId && it.qty > 0)
-            .map(it => ({ ingredientId: it.ingredientId, qty: it.qty, slotCat: it.slotCat }));
-          return { id: uid(), type: builderType, items, createdAt: Date.now() };
-        }, [builderItems, builderType]);
-
-        const builderTotals = useMemo(() => mealTotals(builderMeal, ingById), [builderMeal, ingById]);
-
-        function addMealToDate() {
-          if (!activeProfile) return;
-          if (!builderMeal.items.length) return alert("Elegí al menos 1 ingrediente con cantidad.");
-          setState(s => {
-            const pid = activeProfile.id;
-            const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
-            const ds = pl.selectedDate ?? todayStr();
-            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
-            const arr = [...(mealsByDate[ds] ?? [])];
-            arr.push(builderMeal);
-            mealsByDate[ds] = arr;
-            return {
-              ...s,
-              plansByProfileId: {
-                ...(s.plansByProfileId||{}),
-                [pid]: { ...pl, mealsByDate }
-              }
-            };
-          });
-        }
-
-        function removeMealFromDate(idx) {
-          if (!activeProfile) return;
-          setState(s => {
-            const pid = activeProfile.id;
-            const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
-            const ds = pl.selectedDate ?? todayStr();
-            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
-            const arr = [...(mealsByDate[ds] ?? [])];
-            arr.splice(idx, 1);
-            mealsByDate[ds] = arr;
-            return {
-              ...s,
-              plansByProfileId: {
-                ...(s.plansByProfileId||{}),
-                [pid]: { ...pl, mealsByDate }
-              }
-            };
-          });
-        }
-
-        /**********************
-         * Día completo: Packs + duplicar día
-         **********************/
-        const [selectedPackId, setSelectedPackId] = useState(state.dayPacks?.[0]?.id ?? "");
-        useEffect(()=> {
-          if (!selectedPackId && state.dayPacks?.[0]?.id) setSelectedPackId(state.dayPacks[0].id);
-        }, [state.dayPacks?.length]);
-
-        function findPresetIdByName(mealType, presetName) {
-          const all = state.presets ?? [];
-          const hit = all.find(p => p.mealType === mealType && normalize(p.name) === normalize(presetName));
-          if (hit) return hit.id;
-          const near = all.find(p => p.mealType === mealType && normalize(p.name).includes(normalize(presetName)));
-          return near ? near.id : "";
-        }
-
-        function buildMealFromPresetId(mealType, presetId) {
-          const def = MEAL_TYPES.find(m=>m.key===mealType);
-          const preset = (state.presets ?? []).find(p => p.id === presetId);
-          if (!def || !preset) return null;
-
-          const baseSlots = def.slots.slice();
-          const vegSlotsCount = baseSlots.filter(s=>s==="vegetal").length;
-
-          const items = [];
-          for (const slotCat of baseSlots) {
-            // buscamos el primer item del preset que matchee y no haya sido usado
-            const pItem = (preset.items ?? []).find(x => x.slotCat === slotCat && !x.__used);
-            if (!pItem) continue;
-            pItem.__used = true;
-
-            const ingId = findIngredientIdByMatch(state.ingredients, slotCat, pItem.match);
-            if (!ingId) continue;
-            const ing = ingById[ingId];
-            const qty = suggestQty({ ing, mealType, slotCat, targetKcal, vegSlotCount: vegSlotsCount });
-            items.push({ ingredientId: ingId, qty, slotCat });
-          }
-          // limpiar flags temporales
-          for (const it of (preset.items ?? [])) delete it.__used;
-
-          return { id: uid(), type: mealType, items, createdAt: Date.now(), fromPreset: preset.name };
-        }
-
-        function applyDayPackToSelectedDate({ replace=false } = {}) {
-          if (!activeProfile) return;
-          const pack = (state.dayPacks ?? []).find(p => p.id === selectedPackId);
-          if (!pack) return alert("Elegí un pack.");
 
           setState(s => {
             const pid = activeProfile.id;
             const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
             const ds = pl.selectedDate ?? todayStr();
-            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
+            const entriesByDate = { ...(pl.entriesByDate ?? {}) };
+            const day = { ...makeEmptyDayColumns(), ...(entriesByDate[ds] || {}) };
 
-            const existing = [...(mealsByDate[ds] ?? [])];
-            const nextArr = replace ? [] : existing;
+            const colArr = [...(day[entryModalCol] || [])];
 
-            // orden lógico del día
-            const order = ["desayuno","almuerzo","merienda","cena","otros"];
+            const entryObj = {
+              id: draft.id,
+              mealCol: entryModalCol,
+              title: draft.title || "",
+              photoDataUrl: draft.photoDataUrl || "",
+              source: draft.source || "manual",
+              notes: draft.notes || "",
+              items: (draft.items || []).filter(it => it.ingredientId && it.qty > 0),
+              createdAt: draft.createdAt || Date.now(),
+            };
 
-            for (const mt of order) {
-              if (!pack.byType?.[mt]) continue;
-              const presetId = findPresetIdByName(mt, pack.byType[mt]);
-              if (!presetId) continue;
-              const meal = buildMealFromPresetId(mt, presetId);
-              if (meal && meal.items?.length) nextArr.push(meal);
-            }
+            const idx = colArr.findIndex(x => x.id === (editingEntryId || draft.id));
+            if (idx >= 0) colArr[idx] = entryObj;
+            else colArr.unshift(entryObj);
 
-            mealsByDate[ds] = nextArr;
+            day[entryModalCol] = colArr;
+            entriesByDate[ds] = day;
+
             return {
               ...s,
               plansByProfileId: {
                 ...(s.plansByProfileId||{}),
-                [pid]: { ...pl, mealsByDate }
+                [pid]: { ...pl, entriesByDate }
               }
             };
           });
+
+          closeEntryModal();
         }
 
-        const [dupFromDate, setDupFromDate] = useState(todayStr());
-
-        function duplicateDayMeals() {
+        function deleteEntry(colKey, entryId) {
           if (!activeProfile) return;
-          const from = dupFromDate;
-          const to = selectedDate;
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return alert("Elegí una fecha origen válida.");
-          if (from === to) return alert("Origen y destino son la misma fecha.");
-
+          if (!confirm("¿Eliminar este registro?")) return;
           setState(s => {
             const pid = activeProfile.id;
             const pl = s.plansByProfileId?.[pid] ?? makeEmptyPlanDates();
-            const mealsByDate = { ...(pl.mealsByDate ?? {}) };
-            const src = mealsByDate[from] ?? [];
-            mealsByDate[to] = src.map(m => ({ ...m, id: uid(), createdAt: Date.now(), duplicatedFrom: from }));
-            const dateList2 = pl.dateList?.includes(from) ? pl.dateList : [from, ...(pl.dateList ?? [])];
-            const dateList3 = dateList2.includes(to) ? dateList2 : [to, ...dateList2];
-            const selShop = { ...(pl.selectedForShopping ?? {}) };
-            if (selShop[from] === undefined) selShop[from] = true;
-            if (selShop[to] === undefined) selShop[to] = true;
+            const ds = pl.selectedDate ?? todayStr();
+            const entriesByDate = { ...(pl.entriesByDate ?? {}) };
+            const day = { ...makeEmptyDayColumns(), ...(entriesByDate[ds] || {}) };
+            day[colKey] = (day[colKey] || []).filter(en => en.id !== entryId);
+            entriesByDate[ds] = day;
+
             return {
               ...s,
               plansByProfileId: {
                 ...(s.plansByProfileId||{}),
-                [pid]: { ...pl, dateList: dateList3, mealsByDate, selectedForShopping: selShop }
+                [pid]: { ...pl, entriesByDate }
               }
             };
           });
         }
 
-        function saveSelectedDateAsPack() {
-          if (!activeProfile) return;
-          const name = prompt("Nombre del pack (día completo):");
-          if (!name) return;
-
-          // toma del día: primer comida por cada tipo (si hay más, toma la primera)
-          const byType = {};
-          for (const mt of ["desayuno","almuerzo","merienda","cena"]) {
-            const meal = (mealsToday ?? []).find(m => m.type === mt);
-            if (!meal) continue;
-
-            // Convertimos a preset implícito por nombres de ingredientes (si no existe, lo crea)
-            const presetName = `${MEAL_TYPES.find(x=>x.key===mt)?.label ?? mt} · (desde pack) ${name}`;
-            const items = (meal.items ?? [])
-              .filter(it => it.ingredientId)
-              .map(it => ({ slotCat: it.slotCat ?? "extra", match: ingById[it.ingredientId]?.name ?? "" }))
-              .filter(x => x.match);
-
-            const newPreset = { id: uid(), mealType: mt, name: presetName, items };
-
-            byType[mt] = presetName;
-
-            setState(s => ({
-              ...s,
-              presets: [newPreset, ...(s.presets ?? [])],
-            }));
-          }
-
-          // Como hicimos setState arriba, guardamos el pack en un setState separado
-          setState(s => {
-            const pack = { id: uid(), name, byType };
-            return { ...s, dayPacks: [pack, ...(s.dayPacks ?? [])] };
-          });
-
-          alert("Pack guardado. (Creé presets vinculados por nombre).");
-        }
-
-        /**********************
-         * Day kcal
-         **********************/
         const dayKcal = useMemo(() => {
           let sum = 0;
-          for (const m of mealsToday) sum += mealTotals(m, ingById).kcal;
+          for (const col of MEAL_COLS) {
+            const arr = entriesToday?.[col.key] || [];
+            for (const en of arr) sum += entryTotals(en, ingById).kcal;
+          }
           return round(sum, 0);
-        }, [mealsToday, ingById]);
+        }, [entriesToday, ingById]);
 
         /**********************
          * Shopping list
@@ -1291,15 +1053,22 @@
           if (!plan) return [];
           const sel = plan.selectedForShopping ?? {};
           const map = new Map();
+
           for (const ds of (plan.dateList ?? [])) {
             if (!sel[ds]) continue;
-            const meals = plan.mealsByDate?.[ds] ?? [];
-            for (const meal of meals) {
-              for (const it of (meal.items ?? [])) {
-                map.set(it.ingredientId, (map.get(it.ingredientId) ?? 0) + (it.qty ?? 0));
+            const day = plan.entriesByDate?.[ds] ?? null;
+            if (!day) continue;
+
+            for (const col of MEAL_COLS) {
+              const arr = day[col.key] || [];
+              for (const en of arr) {
+                for (const it of (en.items ?? [])) {
+                  map.set(it.ingredientId, (map.get(it.ingredientId) ?? 0) + (it.qty ?? 0));
+                }
               }
             }
           }
+
           const rows = [];
           for (const [ingId, qty] of map.entries()) {
             const ing = ingById[ingId];
@@ -1336,13 +1105,145 @@
               profiles: obj.profiles,
               activeProfileId: obj.activeProfileId ?? obj.profiles?.[0]?.id ?? null,
               ingredients: obj.ingredients,
-              presets: obj.presets ?? defaultPresets(),
-              dayPacks: obj.dayPacks ?? defaultDayPacks(),
               plansByProfileId: obj.plansByProfileId ?? {},
             });
           };
           reader.readAsText(file);
         }
+
+        /**********************
+         * Ingredients UI (collapse + modal add + search)
+         **********************/
+        const [ingredientSearch, setIngredientSearch] = useState("");
+        const [expandedIngredientIds, setExpandedIngredientIds] = useState(() => ({}));
+
+        function toggleExpandedIng(id) {
+          setExpandedIngredientIds(m => ({ ...m, [id]: !m[id] }));
+        }
+
+        const filteredIngredients = useMemo(() => {
+          const q = ingredientSearch.trim().toLowerCase();
+          if (!q) return state.ingredients;
+          return state.ingredients.filter(i => (i.name || "").toLowerCase().includes(q));
+        }, [state.ingredients, ingredientSearch]);
+
+        // Add Ingredient Modal
+        const [addIngOpen, setAddIngOpen] = useState(false);
+        const [newIng, setNewIng] = useState({
+          id: uid(),
+          name: "",
+          category: "proteina",
+          unit: "g",
+          portionDefault: 100,
+          kcalPer100: 100,
+          kcalPerUnit: 0,
+        });
+
+        function openAddIngredientModal() {
+          setNewIng({
+            id: uid(),
+            name: "Nuevo ingrediente",
+            category: "proteina",
+            unit: "g",
+            portionDefault: 100,
+            kcalPer100: 100,
+            kcalPerUnit: 0,
+          });
+          setAddIngOpen(true);
+        }
+        function saveNewIngredient() {
+          if (!newIng.name.trim()) return alert("Poné un nombre.");
+          const ing = { ...newIng };
+          // limpiar campos según unidad
+          if (ing.unit === "u") {
+            ing.kcalPerUnit = isFinite(ing.kcalPerUnit) ? ing.kcalPerUnit : 0;
+            delete ing.kcalPer100;
+          } else {
+            ing.kcalPer100 = isFinite(ing.kcalPer100) ? ing.kcalPer100 : 0;
+            delete ing.kcalPerUnit;
+          }
+          addIngredient(ing);
+          setAddIngOpen(false);
+        }
+
+        /**********************
+         * Day columns rendering
+         **********************/
+        function EntryCard({ colKey, entry }) {
+          const tot = entryTotals(entry, ingById);
+          const hasPhoto = !!entry.photoDataUrl;
+
+          return (
+            <div className="rounded-xl border border-zinc-200 bg-white p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-semibold text-sm">
+                    {entry.title?.trim() ? entry.title : "Registro"}
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {entry.source === "foto" ? "📷 Foto" : "✍️ Manual"} · <span className="mono">{tot.kcal}</span> kcal
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-lg px-2 py-1 text-xs border border-zinc-200 hover:bg-zinc-50"
+                    onClick={()=> openEditEntry(colKey, entry)}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="rounded-lg px-2 py-1 text-xs border border-red-200 text-red-700 hover:bg-red-50"
+                    onClick={()=> deleteEntry(colKey, entry.id)}
+                  >
+                    Borrar
+                  </button>
+                </div>
+              </div>
+
+              {hasPhoto ? (
+                <div className="mt-2">
+                  <img src={entry.photoDataUrl} alt="foto" className="w-full rounded-lg border border-zinc-200" />
+                </div>
+              ) : null}
+
+              {(entry.items?.length ?? 0) > 0 ? (
+                <div className="mt-2 text-sm text-zinc-700 space-y-1">
+                  {entry.items.map((it, i) => {
+                    const ing = ingById[it.ingredientId];
+                    return (
+                      <div key={i} className="flex items-center justify-between border-b last:border-b-0 border-zinc-100 py-1">
+                        <div className="text-sm">{ing?.name ?? "?"}</div>
+                        <div className="mono text-xs text-zinc-600">
+                          {round(it.qty,0)} {ing?.unit ?? ""} · {round(kcalForItem(ing, it.qty),0)} kcal
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {entry.notes?.trim() ? (
+                <div className="mt-2 text-xs text-zinc-600">
+                  <span className="font-semibold">Notas:</span> {entry.notes}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+
+        /**********************
+         * Draft ingredient list (search + default categories)
+         **********************/
+        const ingredientListForDraft = useMemo(() => {
+          const q = ingSearch.trim().toLowerCase();
+          const allowedCats = new Set(catFilter || []);
+          return state.ingredients
+            .filter(i => allowedCats.has(i.category))
+            .filter(i => !q || (i.name || "").toLowerCase().includes(q))
+            .sort((a,b)=> (a.name || "").localeCompare(b.name || ""));
+        }, [state.ingredients, ingSearch, catFilter]);
+
+        const draftTotals = useMemo(() => entryTotals(draft, ingById), [draft, ingById]);
 
         /**********************
          * Render
@@ -1351,7 +1252,7 @@
           <div className="min-h-screen">
             <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-zinc-100">
               <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
-                <div className="font-bold tracking-tight">Platos · Configurador</div>
+                <div className="font-bold tracking-tight">Platos · Diario</div>
                 <Badge>localStorage</Badge>
 
                 <div className="ml-auto flex items-center gap-2">
@@ -1373,7 +1274,7 @@
 
               <div className="max-w-6xl mx-auto px-4 pb-3 flex flex-wrap gap-2">
                 {[
-                  { key:"armador", label:"Armador" },
+                  { key:"dia", label:"Día" },
                   { key:"compras", label:"Compras" },
                   { key:"ingredientes", label:"Ingredientes" },
                   { key:"perfiles", label:"Perfiles" },
@@ -1419,10 +1320,7 @@
                           label="Sexo"
                           value={activeProfile.sex}
                           onChange={(v)=> updateProfile(activeProfile.id, { sex: v })}
-                          options={[
-                            { key:"m", label:"Masculino" },
-                            { key:"f", label:"Femenino" },
-                          ]}
+                          options={[{ key:"m", label:"Masculino" },{ key:"f", label:"Femenino" }]}
                         />
                         <NumberField label="Edad" value={activeProfile.age} onChange={(n)=> updateProfile(activeProfile.id, { age: n })} min={14} max={90} suffix="años" />
                         <NumberField label="Altura" value={activeProfile.heightCm} onChange={(n)=> updateProfile(activeProfile.id, { heightCm: n })} min={120} max={220} suffix="cm" />
@@ -1533,7 +1431,6 @@
 
                             <div className="pt-2">
                               <div className="text-xs font-semibold text-zinc-700 mb-2">Evolución por mes (vs inicial)</div>
-
                               <div className="space-y-2">
                                 {weightStats.months.map(m => {
                                   const delta = m.deltaVsInitial;
@@ -1544,26 +1441,19 @@
 
                                   return (
                                     <div key={m.ym} className="grid grid-cols-12 gap-2 items-center">
-                                      <div className="col-span-4 text-xs text-zinc-600">
-                                        {monthLabel(m.ym)}
-                                      </div>
+                                      <div className="col-span-4 text-xs text-zinc-600">{monthLabel(m.ym)}</div>
                                       <div className="col-span-6">
                                         <div className="h-3 rounded-full bg-white border border-zinc-200 overflow-hidden">
-                                          <div
-                                            className={"h-full " + (isDown ? "bg-emerald-500" : "bg-red-500")}
-                                            style={{ width: pct + "%" }}
-                                          />
+                                          <div className={"h-full " + (isDown ? "bg-emerald-500" : "bg-red-500")} style={{ width: pct + "%" }} />
                                         </div>
                                       </div>
-                                      <div className="col-span-2 mono text-xs text-right">
-                                        {delta > 0 ? "+" : ""}{delta} kg
-                                      </div>
+                                      <div className="col-span-2 mono text-xs text-right">{delta > 0 ? "+" : ""}{delta} kg</div>
                                     </div>
                                   );
                                 })}
                               </div>
 
-                              {weightStats.best || weightStats.worst ? (
+                              {(weightStats.best || weightStats.worst) ? (
                                 <div className="mt-3 grid grid-cols-2 gap-2">
                                   <div className="rounded-lg bg-white border border-zinc-200 p-2">
                                     <div className="text-xs text-zinc-500">Mejor mes</div>
@@ -1600,7 +1490,7 @@
                                 ))}
                               </div>
                               <div className="text-xs text-zinc-500 mt-2">
-                                Tip: si cargás la misma fecha, se reemplaza.
+                                Tip: si cargás la misma fecha, se reemplaza (sirve para “peso oficial del día”).
                               </div>
                             </div>
                           </div>
@@ -1621,7 +1511,7 @@
                   )}
                 </Card>
 
-                {activeProfile && tab === "armador" ? (
+                {activeProfile && tab === "dia" ? (
                   <Card title="Calendario" right={<Badge>{selectedDate}</Badge>}>
                     <div className="grid grid-cols-1 gap-3">
                       <div className="flex items-end gap-2">
@@ -1681,72 +1571,6 @@
                           </span>
                         </div>
                       ) : null}
-
-                      {/* PACK DÍA COMPLETO */}
-                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold text-sm">Pack (día completo)</div>
-                          <Badge>rápido</Badge>
-                        </div>
-
-                        <select
-                          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                          value={selectedPackId}
-                          onChange={(e)=> setSelectedPackId(e.target.value)}
-                        >
-                          {(state.dayPacks ?? []).map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
-                            onClick={()=> applyDayPackToSelectedDate({ replace:false })}
-                          >
-                            Aplicar (sumar)
-                          </button>
-                          <button
-                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
-                            onClick={()=> applyDayPackToSelectedDate({ replace:true })}
-                          >
-                            Aplicar (reemplazar)
-                          </button>
-                          <button
-                            className="col-span-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
-                            onClick={saveSelectedDateAsPack}
-                          >
-                            Guardar este día como Pack
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* DUPLICAR DÍA */}
-                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold text-sm">Duplicar comidas</div>
-                          <Badge>copiar</Badge>
-                        </div>
-
-                        <label className="block">
-                          <div className="text-xs font-semibold text-zinc-700 mb-1">Desde fecha</div>
-                          <input
-                            type="date"
-                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                            value={dupFromDate}
-                            onChange={(e)=> setDupFromDate(e.target.value)}
-                          />
-                        </label>
-                        <button
-                          className="w-full rounded-xl bg-emerald-600 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-500"
-                          onClick={duplicateDayMeals}
-                        >
-                          Copiar {dupFromDate} → {selectedDate}
-                        </button>
-                        <div className="text-xs text-zinc-500">
-                          Copia todo el día origen y lo pega en la fecha seleccionada.
-                        </div>
-                      </div>
                     </div>
                   </Card>
                 ) : null}
@@ -1754,215 +1578,49 @@
 
               {/* RIGHT */}
               <div className="lg:col-span-2 space-y-4">
-                {tab === "armador" && activeProfile ? (
-                  <>
-                    <Card
-                      title="Armador de comidas"
-                      right={
-                        <div className="flex flex-wrap items-end gap-2">
-                          <div className="w-40">
-                            <Select
-                              label="Tipo"
-                              value={builderType}
-                              onChange={setBuilderType}
-                              options={MEAL_TYPES.map(m => ({ key:m.key, label:m.label }))}
-                            />
-                          </div>
+                {tab === "dia" && activeProfile ? (
+                  <Card
+                    title={`Día · ${weekdayLabel(selectedDate)} ${selectedDate}`}
+                    right={<Badge>5 columnas</Badge>}
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                      {MEAL_COLS.map(col => {
+                        const arr = entriesToday?.[col.key] || [];
+                        const colKcal = arr.reduce((s,en)=> s + entryTotals(en, ingById).kcal, 0);
 
-                          <div className="w-72">
-                            <Select
-                              label="Preset"
-                              value={selectedPresetId}
-                              onChange={setSelectedPresetId}
-                              options={[
-                                { key:"", label:"— elegir —" },
-                                ...presetsForType.map(p => ({ key:p.id, label:p.name })),
-                              ]}
-                            />
-                          </div>
-
-                          <button
-                            className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
-                            onClick={() => {
-                              if (!selectedPresetId) return alert("Elegí un preset.");
-                              applyPreset(selectedPresetId);
-                            }}
-                          >
-                            Aplicar
-                          </button>
-
-                          <button
-                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
-                            onClick={saveCurrentAsPreset}
-                            title="Guarda la selección actual como preset editable"
-                          >
-                            Guardar
-                          </button>
-
-                          <button
-                            className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
-                            onClick={() => {
-                              if (!selectedPresetId) return;
-                              deletePreset(selectedPresetId);
-                            }}
-                            title="Eliminar preset"
-                          >
-                            Borrar
-                          </button>
-                        </div>
-                      }
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-sm text-zinc-600">
-                          Consejo: aplicá un preset y luego editá lo que quieras (cantidades, ingredientes, agregar/sacar).
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
-                            onClick={addSlot}
-                            title="Agregar un slot (ideal para 'Otros' o para sumar extras)"
-                          >
-                            + Slot
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {builderSlots.map((cat, idx) => {
-                          const slot = builderItems[idx] ?? { ingredientId:"", qty:0 };
-                          const list = ingredientsByCat[cat] ?? [];
-                          const catLabel = CATS.find(c => c.key===cat)?.label ?? cat;
-
-                          return (
-                            <div key={idx} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                              <div className="flex items-center justify-between mb-2 gap-2">
-                                <div className="text-xs font-semibold text-zinc-700">
-                                  {catLabel} <span className="text-zinc-400">· slot {idx+1}</span>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  <select
-                                    className="rounded-xl border border-zinc-200 bg-white px-2 py-1 text-xs"
-                                    value={cat}
-                                    onChange={(e)=> setSlotCat(idx, e.target.value)}
-                                    title="Cambiar categoría del slot"
-                                  >
-                                    {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                  </select>
-
-                                  <button
-                                    className="rounded-lg px-2 py-1 text-xs border border-zinc-200 hover:bg-white"
-                                    onClick={()=> removeSlot(idx)}
-                                    title="Eliminar este slot"
-                                  >
-                                    ✕
-                                  </button>
+                        return (
+                          <div key={col.key} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 flex flex-col gap-2 min-h-[420px]">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="font-semibold">{col.label}</div>
+                                <div className="text-xs text-zinc-500">
+                                  <span className="mono">{round(colKcal,0)}</span> kcal
                                 </div>
                               </div>
-
-                              <select
-                                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                value={slot.ingredientId ?? ""}
-                                onChange={(e)=> pickIngredient(idx, e.target.value)}
+                              <button
+                                className="rounded-xl bg-zinc-900 text-white px-3 py-1.5 text-sm hover:bg-zinc-800"
+                                onClick={()=> openAddEntry(col.key)}
                               >
-                                <option value="">— elegir —</option>
-                                {list.map(ing => <option key={ing.id} value={ing.id}>{ing.name}</option>)}
-                              </select>
-
-                              <div className="mt-2 grid grid-cols-2 gap-2 items-end">
-                                <NumberField
-                                  label="Cantidad (según perfil)"
-                                  value={slot.qty ?? 0}
-                                  onChange={(n)=> setQty(idx, n)}
-                                  min={0} max={5000}
-                                  suffix={slot.ingredientId ? (ingById[slot.ingredientId]?.unit ?? "") : ""}
-                                />
-                                <div className="rounded-xl border border-zinc-200 bg-white p-2">
-                                  <div className="text-xs text-zinc-500">kcal (slot)</div>
-                                  <div className="mono font-semibold">
-                                    {round(kcalForItem(ingById[slot.ingredientId], slot.qty), 0)}
-                                  </div>
-                                </div>
-                              </div>
+                                + Agregar
+                              </button>
                             </div>
-                          );
-                        })}
-                      </div>
 
-                      <div className="mt-4 flex flex-wrap items-center gap-3">
-                        <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
-                          <div className="text-xs text-zinc-500">kcal comida</div>
-                          <div className="mono text-lg font-semibold">{builderTotals.kcal}</div>
-                        </div>
-
-                        <button
-                          className="rounded-xl bg-emerald-600 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500"
-                          onClick={addMealToDate}
-                        >
-                          + Agregar a {selectedDate}
-                        </button>
-
-                        <button
-                          className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm hover:bg-zinc-50"
-                          onClick={()=> {
-                            setBuilderSlots(builderDef.slots);
-                            setBuilderItems(builderDef.slots.map(cat => ({ slotCat: cat, ingredientId:"", qty:0 })));
-                          }}
-                        >
-                          Limpiar
-                        </button>
-                      </div>
-                    </Card>
-
-                    <Card title={`Comidas del ${weekdayLabel(selectedDate)} ${selectedDate}`} right={<Badge>{mealsToday.length} items</Badge>}>
-                      {mealsToday.length === 0 ? (
-                        <div className="text-sm text-zinc-600">Todavía no cargaste comidas para esta fecha.</div>
-                      ) : (
-                        <div className="space-y-3">
-                          {mealsToday.map((m, idx) => {
-                            const def = MEAL_TYPES.find(x => x.key===m.type);
-                            const tot = mealTotals(m, ingById);
-
-                            return (
-                              <div key={m.id} className="rounded-xl border border-zinc-200 bg-white p-3">
-                                <div className="flex items-center justify-between">
-                                  <div className="font-semibold">{def?.label ?? m.type}</div>
-                                  <div className="flex items-center gap-2">
-                                    <Badge>{tot.kcal} kcal</Badge>
-                                    <button
-                                      className="rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
-                                      onClick={()=> removeMealFromDate(idx)}
-                                    >
-                                      Quitar
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="mt-2 text-sm text-zinc-700">
-                                  {(m.items ?? []).map((it, i) => {
-                                    const ing = ingById[it.ingredientId];
-                                    return (
-                                      <div key={i} className="flex items-center justify-between border-b last:border-b-0 border-zinc-100 py-1">
-                                        <div className="flex items-center gap-2">
-                                          <span>{ing?.name ?? "?"}</span>
-                                          <span className="text-xs text-zinc-400">({it.slotCat ?? "slot"})</span>
-                                        </div>
-                                        <div className="mono text-zinc-600">
-                                          {round(it.qty, 0)} {ing?.unit ?? ""}
-                                          {" · "}
-                                          {round(kcalForItem(ing, it.qty), 0)} kcal
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
+                            {arr.length === 0 ? (
+                              <div className="text-xs text-zinc-500 mt-2">
+                                Sin registros todavía.
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </Card>
-                  </>
+                            ) : (
+                              <div className="space-y-2">
+                                {arr.map(en => (
+                                  <EntryCard key={en.id} colKey={col.key} entry={en} />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
                 ) : null}
 
                 {tab === "compras" && activeProfile ? (
@@ -1990,11 +1648,7 @@
                       <div className="flex flex-wrap gap-2">
                         {(dateList ?? []).map(ds => (
                           <label key={ds} className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={!!(plan?.selectedForShopping?.[ds])}
-                              onChange={()=> toggleShopDate(ds)}
-                            />
+                            <input type="checkbox" checked={!!(plan?.selectedForShopping?.[ds])} onChange={()=> toggleShopDate(ds)} />
                             <span>{weekdayLabel(ds)} {ds}</span>
                           </label>
                         ))}
@@ -2003,7 +1657,7 @@
 
                     {shopping.length === 0 ? (
                       <div className="text-sm text-zinc-600">
-                        No hay comidas cargadas en las fechas seleccionadas. Cargá comidas y/o tildá fechas.
+                        No hay comidas cargadas en las fechas seleccionadas. Cargá registros y/o tildá fechas.
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
@@ -2034,80 +1688,106 @@
 
                 {tab === "ingredientes" ? (
                   <Card
-                    title="Ingredientes permitidos (editable)"
+                    title="Ingredientes permitidos"
                     right={
                       <button
                         className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
-                        onClick={addIngredient}
+                        onClick={openAddIngredientModal}
                       >
                         + Ingrediente
                       </button>
                     }
                   >
-                    <div className="text-sm text-zinc-600 mb-3">
-                      Biblioteca editable. La porción sugerida se adapta al escenario del perfil (LOW/MID/HIGH).
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="relative flex-1">
+                        <IconSearch className="w-5 h-5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          className="w-full rounded-xl border border-zinc-200 bg-white pl-10 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+                          placeholder="Buscar ingrediente..."
+                          value={ingredientSearch}
+                          onChange={(e)=> setIngredientSearch(e.target.value)}
+                        />
+                      </div>
+                      <Badge>{filteredIngredients.length}</Badge>
                     </div>
 
-                    <div className="space-y-3">
-                      {state.ingredients.map(ing => {
+                    <div className="text-sm text-zinc-600 mb-3">
+                      Vista simple (solo nombres). Tocá la flecha para ver detalles.
+                    </div>
+
+                    <div className="space-y-2">
+                      {filteredIngredients.map(ing => {
+                        const expanded = !!expandedIngredientIds[ing.id];
                         const isUnit = ing.unit === "u";
                         return (
                           <div key={ing.id} className="rounded-xl border border-zinc-200 bg-white p-3">
                             <div className="flex items-center justify-between gap-3">
-                              <div className="flex-1">
-                                <TextField label="Nombre" value={ing.name} onChange={(v)=> updateIngredient(ing.id, { name: v })} />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  className="rounded-lg border border-zinc-200 px-2 py-1 text-sm hover:bg-zinc-50"
+                                  onClick={()=> toggleExpandedIng(ing.id)}
+                                  title={expanded ? "Ocultar" : "Mostrar"}
+                                >
+                                  {expanded ? "▾" : "▸"}
+                                </button>
+                                <div className="font-semibold">{ing.name}</div>
                               </div>
                               <button
-                                className="mt-6 rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
+                                className="rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
                                 onClick={()=> { if (confirm("¿Eliminar ingrediente?")) removeIngredient(ing.id); }}
                               >
                                 Eliminar
                               </button>
                             </div>
 
-                            <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
-                              <Select
-                                label="Categoría"
-                                value={ing.category}
-                                onChange={(v)=> updateIngredient(ing.id, { category: v })}
-                                options={CATS.map(c => ({ key:c.key, label:c.label }))}
-                              />
-                              <Select
-                                label="Unidad"
-                                value={ing.unit}
-                                onChange={(v)=> {
-                                  if (v === "u") {
-                                    updateIngredient(ing.id, { unit: v, kcalPerUnit: ing.kcalPerUnit ?? 0, kcalPer100: undefined });
-                                  } else {
-                                    updateIngredient(ing.id, { unit: v, kcalPer100: ing.kcalPer100 ?? 0, kcalPerUnit: undefined });
-                                  }
-                                }}
-                                options={UNITS}
-                              />
-                              <NumberField
-                                label="Porción base"
-                                value={ing.portionDefault ?? 0}
-                                onChange={(n)=> updateIngredient(ing.id, { portionDefault: n })}
-                                min={0} max={5000}
-                                suffix={ing.unit}
-                              />
-                              {isUnit ? (
-                                <NumberField
-                                  label="kcal por unidad"
-                                  value={ing.kcalPerUnit ?? 0}
-                                  onChange={(n)=> updateIngredient(ing.id, { kcalPerUnit: n })}
-                                  min={0} max={2000}
+                            {expanded ? (
+                              <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <Select
+                                  label="Categoría"
+                                  value={ing.category}
+                                  onChange={(v)=> updateIngredient(ing.id, { category: v })}
+                                  options={CATS.map(c => ({ key:c.key, label:c.label }))}
                                 />
-                              ) : (
-                                <NumberField
-                                  label="kcal por 100"
-                                  value={ing.kcalPer100 ?? 0}
-                                  onChange={(n)=> updateIngredient(ing.id, { kcalPer100: n })}
-                                  min={0} max={2000}
-                                  suffix={ing.unit === "ml" ? "ml" : "g"}
+                                <Select
+                                  label="Unidad"
+                                  value={ing.unit}
+                                  onChange={(v)=> {
+                                    if (v === "u") {
+                                      updateIngredient(ing.id, { unit: v, kcalPerUnit: ing.kcalPerUnit ?? 0 });
+                                    } else {
+                                      updateIngredient(ing.id, { unit: v, kcalPer100: ing.kcalPer100 ?? 0 });
+                                    }
+                                  }}
+                                  options={UNITS}
                                 />
-                              )}
-                            </div>
+                                <NumberField
+                                  label="Porción base"
+                                  value={ing.portionDefault ?? 0}
+                                  onChange={(n)=> updateIngredient(ing.id, { portionDefault: n })}
+                                  min={0} max={5000}
+                                  suffix={ing.unit}
+                                />
+                                {isUnit ? (
+                                  <NumberField
+                                    label="kcal por unidad"
+                                    value={ing.kcalPerUnit ?? 0}
+                                    onChange={(n)=> updateIngredient(ing.id, { kcalPerUnit: n })}
+                                    min={0} max={2000}
+                                  />
+                                ) : (
+                                  <NumberField
+                                    label="kcal por 100"
+                                    value={ing.kcalPer100 ?? 0}
+                                    onChange={(n)=> updateIngredient(ing.id, { kcalPer100: n })}
+                                    min={0} max={2000}
+                                    suffix={ing.unit === "ml" ? "ml" : "g"}
+                                  />
+                                )}
+                                <div className="md:col-span-4">
+                                  <TextField label="Nombre" value={ing.name} onChange={(v)=> updateIngredient(ing.id, { name: v })} />
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -2156,9 +1836,272 @@
 
             <footer className="max-w-6xl mx-auto px-4 pb-10">
               <div className="text-xs text-zinc-500">
-                Guardado local (localStorage). Exportá/Importá JSON para backup o moverlo entre celular/PC.
+                Guardado local (localStorage). Exportá/Importá JSON para backup.
               </div>
             </footer>
+
+            {/* Modal: Add/Edit Entry */}
+            <Modal
+              open={entryModalOpen}
+              title={(editingEntryId ? "Editar" : "Agregar") + " · " + (MEAL_COLS.find(x=>x.key===entryModalCol)?.label ?? entryModalCol)}
+              onClose={closeEntryModal}
+              footer={
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-zinc-600">
+                    Total entrada: <span className="mono font-semibold">{draftTotals.kcal}</span> kcal
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                      onClick={closeEntryModal}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800"
+                      onClick={saveDraftToDay}
+                    >
+                      Guardar
+                    </button>
+                  </div>
+                </div>
+              }
+            >
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <TextField
+                    label="Título (opcional)"
+                    value={draft.title}
+                    onChange={(v)=> setDraft(d => ({ ...d, title: v }))}
+                    placeholder="Ej: Sandwich + fruta / Ensalada + pollo"
+                  />
+                  <label className="block">
+                    <div className="text-xs font-semibold text-zinc-700 mb-1">Foto (opcional)</div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                      onChange={(e)=> {
+                        const f = e.target.files?.[0];
+                        if (f) handlePhotoUpload(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    <div className="text-xs text-zinc-500 mt-1">Se guarda optimizada en el dispositivo.</div>
+                  </label>
+                </div>
+
+                {draft.photoDataUrl ? (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold">Vista previa</div>
+                      <button
+                        className="rounded-lg px-2 py-1 text-sm border border-zinc-200 hover:bg-white"
+                        onClick={()=> setDraft(d => ({ ...d, photoDataUrl:"", source:"manual" }))}
+                      >
+                        Quitar foto
+                      </button>
+                    </div>
+                    <img src={draft.photoDataUrl} alt="foto" className="mt-2 w-full rounded-lg border border-zinc-200" />
+                  </div>
+                ) : null}
+
+                <TextField
+                  label="Notas (opcional) · acá podés corregir/explicar lo que la foto “interpretó”"
+                  value={draft.notes}
+                  onChange={(v)=> setDraft(d => ({ ...d, notes: v }))}
+                  placeholder="Ej: tenía 1 cda de aceite / era media porción / etc."
+                />
+
+                {/* Category filters */}
+                <div className="rounded-xl border border-zinc-200 bg-white p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold">Ingredientes (buscar + agregar)</div>
+                    <Badge>{(catFilter || []).length} categorías</Badge>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(DEFAULT_CAT_FILTER.extras).map(cat => {
+                      const on = (catFilter || []).includes(cat);
+                      const label = CATS.find(c=>c.key===cat)?.label ?? cat;
+                      return (
+                        <button
+                          key={cat}
+                          className={[
+                            "px-3 py-1.5 rounded-full text-sm border",
+                            on ? "bg-zinc-900 text-white border-zinc-900" : "bg-white border-zinc-200 hover:bg-zinc-50"
+                          ].join(" ")}
+                          onClick={()=>{
+                            setCatFilter(prev => {
+                              const arr = prev ? [...prev] : [];
+                              if (arr.includes(cat)) return arr.filter(x=>x!==cat);
+                              return [...arr, cat];
+                            });
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                    <button
+                      className="px-3 py-1.5 rounded-full text-sm border bg-white border-zinc-200 hover:bg-zinc-50"
+                      onClick={()=> setCatFilter(DEFAULT_CAT_FILTER[entryModalCol] || DEFAULT_CAT_FILTER.extras)}
+                      title="Volver al filtro recomendado para esta columna"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  <div className="mt-3 relative">
+                    <IconSearch className="w-5 h-5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      className="w-full rounded-xl border border-zinc-200 bg-white pl-10 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+                      placeholder="Buscar ingrediente..."
+                      value={ingSearch}
+                      onChange={(e)=> setIngSearch(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {ingredientListForDraft.slice(0, 30).map(ing => (
+                      <button
+                        key={ing.id}
+                        className="text-left rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 hover:bg-white"
+                        onClick={()=> addDraftItem(ing.id)}
+                        title="Agregar al registro"
+                      >
+                        <div className="font-semibold text-sm">{ing.name}</div>
+                        <div className="text-xs text-zinc-500">
+                          {CATS.find(c=>c.key===ing.category)?.label ?? ing.category}
+                          {" · "}
+                          porción base <span className="mono">{ing.portionDefault}</span> {ing.unit}
+                        </div>
+                      </button>
+                    ))}
+                    {ingredientListForDraft.length > 30 ? (
+                      <div className="text-xs text-zinc-500 md:col-span-2">
+                        Mostrando 30 resultados. Afiná la búsqueda para ver más.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Draft items */}
+                <div className="rounded-xl border border-zinc-200 bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold">Tu registro (editable)</div>
+                    <Badge>{draft.items.length} items</Badge>
+                  </div>
+
+                  {draft.items.length === 0 ? (
+                    <div className="text-sm text-zinc-600 mt-2">
+                      Agregá ingredientes con el buscador. (O guardá solo la foto/título si querés.)
+                    </div>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {draft.items.map(it => {
+                        const ing = ingById[it.ingredientId];
+                        return (
+                          <div key={it.ingredientId} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="font-semibold">{ing?.name ?? "?"}</div>
+                                <div className="text-xs text-zinc-500">
+                                  {CATS.find(c=>c.key===ing?.category)?.label ?? ing?.category}
+                                  {" · "}
+                                  <span className="mono">{round(kcalForItem(ing, it.qty),0)}</span> kcal
+                                </div>
+                              </div>
+                              <button
+                                className="rounded-lg px-2 py-1 text-sm border border-red-200 text-red-700 hover:bg-red-50"
+                                onClick={()=> removeDraftItem(it.ingredientId)}
+                              >
+                                Quitar
+                              </button>
+                            </div>
+
+                            <div className="mt-2 grid grid-cols-2 gap-2 items-end">
+                              <NumberField
+                                label="Cantidad"
+                                value={it.qty}
+                                onChange={(n)=> updateDraftQty(it.ingredientId, n)}
+                                min={0} max={10000}
+                                suffix={ing?.unit ?? ""}
+                              />
+                              <div className="rounded-xl border border-zinc-200 bg-white p-2">
+                                <div className="text-xs text-zinc-500">Sugerido (perfil)</div>
+                                <div className="mono font-semibold">
+                                  {round(suggestQty({ ing, mealCol: entryModalCol, targetKcal }),0)} {ing?.unit ?? ""}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Modal>
+
+            {/* Modal: Add Ingredient */}
+            <Modal
+              open={addIngOpen}
+              title="Agregar ingrediente"
+              onClose={()=> setAddIngOpen(false)}
+              footer={
+                <div className="flex items-center justify-end gap-2">
+                  <button className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50" onClick={()=> setAddIngOpen(false)}>
+                    Cancelar
+                  </button>
+                  <button className="rounded-xl bg-zinc-900 text-white px-3 py-2 text-sm hover:bg-zinc-800" onClick={saveNewIngredient}>
+                    Guardar ingrediente
+                  </button>
+                </div>
+              }
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <TextField label="Nombre" value={newIng.name} onChange={(v)=> setNewIng(x=>({ ...x, name:v }))} />
+                <Select
+                  label="Categoría"
+                  value={newIng.category}
+                  onChange={(v)=> setNewIng(x=>({ ...x, category:v }))}
+                  options={CATS.map(c => ({ key:c.key, label:c.label }))}
+                />
+                <Select
+                  label="Unidad"
+                  value={newIng.unit}
+                  onChange={(v)=> setNewIng(x=>({ ...x, unit:v }))}
+                  options={UNITS}
+                />
+                <NumberField
+                  label="Porción base"
+                  value={newIng.portionDefault}
+                  onChange={(n)=> setNewIng(x=>({ ...x, portionDefault:n }))}
+                  min={0} max={5000}
+                  suffix={newIng.unit}
+                />
+                {newIng.unit === "u" ? (
+                  <NumberField
+                    label="kcal por unidad"
+                    value={newIng.kcalPerUnit}
+                    onChange={(n)=> setNewIng(x=>({ ...x, kcalPerUnit:n }))}
+                    min={0} max={2000}
+                  />
+                ) : (
+                  <NumberField
+                    label="kcal por 100"
+                    value={newIng.kcalPer100}
+                    onChange={(n)=> setNewIng(x=>({ ...x, kcalPer100:n }))}
+                    min={0} max={2000}
+                    suffix={newIng.unit === "ml" ? "ml" : "g"}
+                  />
+                )}
+                <div className="md:col-span-2 text-xs text-zinc-500">
+                  Tip: si es “por unidad” (u), usá kcal por unidad. Si es g/ml, usá kcal por 100.
+                </div>
+              </div>
+            </Modal>
           </div>
         );
       }
